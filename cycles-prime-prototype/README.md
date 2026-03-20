@@ -2,6 +2,8 @@
 
 A high-fidelity prototype of a B2B financial clearing and settlement platform. Explores multi-counterparty netting cycles, settlement batch management, and real-time clearing views.
 
+> This is a **design iteration prototype**, not the front-end source of truth. The UI was AI-generated and is intended for design exploration and stakeholder feedback only — not for production use.
+
 > No backend, no auth — all data is static and in-memory.
 
 ---
