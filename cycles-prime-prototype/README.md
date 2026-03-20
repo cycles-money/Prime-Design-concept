@@ -1,7 +1,8 @@
-# Cycles Prime – Clearing UI Prototype
+# Cycles Prime
 
-Interactive UX prototype for Cycles Prime's batches and clearing cycle workflow.
-No backend, no auth — all data is static and in-memory.
+A high-fidelity prototype of a B2B financial clearing and settlement platform. Explores multi-counterparty netting cycles, settlement batch management, and real-time clearing views.
+
+> No backend, no auth — all data is static and in-memory.
 
 ---
 
