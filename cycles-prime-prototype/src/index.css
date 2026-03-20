@@ -1,0 +1,287 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ── Design system: grey palette (OKLCH) ─────────────────────────────────────
+   color-1 (darkest, #0D0D0D) → color-12 (lightest)
+   Consistent cool blue-grey tint (hue 264) across all 12 steps.
+   ─────────────────────────────────────────────────────────────────────────── */
+:root {
+  --color-1:  oklch(0.159 0.005 264);   /* #0D0D0D */
+  --color-2:  oklch(0.192 0.007 264);
+  --color-3:  oklch(0.248 0.010 264);
+  --color-4:  oklch(0.296 0.012 264);
+  --color-5:  oklch(0.344 0.013 264);
+  --color-6:  oklch(0.392 0.015 264);
+  --color-7:  oklch(0.456 0.017 264);
+  --color-8:  oklch(0.545 0.019 264);
+  --color-9:  oklch(0.643 0.017 264);
+  --color-10: oklch(0.714 0.014 264);
+  --color-11: oklch(0.858 0.008 264);
+  --color-12: oklch(0.932 0.004 264);
+
+  /* ── Brand palette: #CDF698 lime green ───────────────────────────────────
+     #CDF698 = oklch(0.923 0.128 128) — anchored at --color-100.
+     50 & 100 are light opaque tints (backgrounds, hover surfaces in light mode).
+     200 is the hover shade on lime buttons (slightly richer/darker).
+     300–950 are text accents, focus rings, and dark surface decorations.
+     ────────────────────────────────────────────────────────────────────── */
+  --color-50:  oklch(0.972 0.042 128);   /* near-white lime wash         */
+  --color-100: oklch(0.923 0.128 128);   /* #CDF698 — primary brand      */
+  --color-200: oklch(0.868 0.160 128);   /* hover on lime buttons        */
+  --color-300: oklch(0.805 0.175 128);   /* mid-lime accent              */
+  --color-500: oklch(0.695 0.185 128);   /* saturated lime               */
+  --color-700: oklch(0.572 0.168 128);   /* dark lime text / icons       */
+  --color-800: oklch(0.490 0.148 128);   /* darker lime                  */
+  --color-900: oklch(0.398 0.115 128);   /* deep lime                    */
+  --color-950: oklch(0.312 0.085 128);   /* near-black lime tint         */
+
+  /* ── Semantic status colors ─────────────────────────────────────────────── */
+  --positive:     oklch(0.711 0.139 147);   /* #60B96D — positive / cleared    */
+  --negative:     oklch(0.678 0.157 32);    /* #E86D57 — negative / at risk    */
+
+  /* ── Semantic surface & border tokens ───────────────────────────────────── */
+  --surface-1:    oklch(0.159 0.005 264);   /* ≈ #0D0D0D — primary panels (dark) */
+  --surface-2:    oklch(0.215 0.009 264);   /* ≈ #1C1C1C — secondary bg (dark)   */
+  --surface-3:    oklch(0.268 0.011 264);   /* ≈ #2A2A2A — tertiary bg (dark)    */
+  --border:       oklch(0.872 0.004 264);   /* light mode border  ≈ color-12      */
+
+  /* Custom easing curves — stronger than built-in CSS easings */
+  --ease-out:    cubic-bezier(0.23, 1, 0.32, 1);   /* snappy UI interactions */
+  --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);  /* on-screen movement */
+}
+
+/* ── Brand lime: dark-mode overrides ─────────────────────────────────────────
+   In light mode, --color-50/100/200 are opaque lime surfaces.
+   In dark mode they become translucent tints — Tailwind cannot apply /opacity
+   to CSS variables at build time, so we remap them here using the mid-lime
+   (--color-300 hue) as the tint base for best legibility on dark backgrounds.
+   --color-300 and above remain opaque and read fine on dark surfaces as-is.
+   ─────────────────────────────────────────────────────────────────────────── */
+.dark {
+  --color-50:  oklch(0.805 0.175 128 / 0.10);  /* subtle selection bg      */
+  --color-100: oklch(0.805 0.175 128 / 0.15);  /* slightly stronger tint   */
+  --color-200: oklch(0.805 0.175 128 / 0.28);  /* borders / dividers       */
+  --border:    oklch(0.283 0.011 264);          /* ≈ #2D2E2E — dark mode border, hue 264 */
+  --surface-2: oklch(0.215 0.009 264);          /* ≈ #1C1C1C — secondary bg, hue 264     */
+  --surface-3: oklch(0.268 0.011 264);          /* ≈ #2A2A2A — tertiary bg, hue 264      */
+}
+
+/* Base resets for dense finance UI */
+* {
+  box-sizing: border-box;
+}
+
+body {
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 13px;
+  color: var(--color-2);
+  background-color: var(--color-12);
+  -webkit-font-smoothing: antialiased;
+  font-variant-numeric: tabular-nums;
+}
+
+.dark body {
+  color: var(--color-11);
+  background-color: var(--color-1);
+}
+
+/* Countdown display font */
+.font-led {
+  font-family: 'Space Grotesk', 'Inter', system-ui, sans-serif;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+}
+
+/* Tabular numbers for all number cells */
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Sticky table headers */
+.sticky-thead th {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: var(--color-12);
+}
+.dark .sticky-thead th {
+  background: var(--color-1);
+}
+
+/* Compact table rows */
+.table-compact td,
+.table-compact th {
+  padding: 5px 10px;
+  white-space: nowrap;
+}
+
+/* Focus outline for keyboard users */
+:focus-visible {
+  outline: 2px solid var(--color-700);
+  outline-offset: -1px;
+}
+
+/* Dark mode scrollbar */
+.dark ::-webkit-scrollbar-thumb {
+  background: var(--color-6);
+}
+.dark ::-webkit-scrollbar-thumb:hover {
+  background: var(--color-7);
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--color-9);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-8);
+}
+
+/* Editable cell input */
+.cell-input {
+  width: 100%;
+  background: var(--color-50);
+  border: 1px solid var(--color-700);
+  border-radius: 3px;
+  padding: 1px 4px;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  outline: none;
+  color: var(--color-2);
+}
+.cell-input:focus-visible {
+  outline: 2px solid var(--color-700);
+  outline-offset: -1px;
+}
+.dark .cell-input {
+  background: oklch(0.22 0.05 128);
+  border-color: var(--color-500);
+  color: var(--color-11);
+}
+
+/* Deliver row accent */
+.row-deliver {
+  border-left: 0.5px solid #fda4af;
+}
+.dark .row-deliver {
+  border-left: 0.5px solid #fb7185;
+}
+
+/* Receive row accent */
+.row-receive {
+  border-left: 0.5px solid #6ee7b7;
+}
+.dark .row-receive {
+  border-left: 0.5px solid #34d399;
+}
+
+/* Cleared progress bar */
+.cleared-bar {
+  height: 2px;
+  border-radius: 99px;
+  background: var(--color-10);
+  overflow: hidden;
+}
+.dark .cleared-bar {
+  background: var(--color-5);
+}
+.cleared-bar-fill {
+  height: 100%;
+  background: linear-gradient(to right, oklch(0.63 0.17 155), oklch(0.8 0.14 155));
+  border-radius: 99px;
+  transition: width 0.3s var(--ease-out);
+}
+
+/* Toast animation — CSS transition so multiple toasts retarget smoothly */
+.toast-enter {
+  transform: translateX(0);
+  opacity: 1;
+  transition: transform 200ms var(--ease-out), opacity 150ms ease-out;
+
+  @starting-style {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+}
+
+/* Modal overlay */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: oklch(0.197 0.008 264 / 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 50;
+  backdrop-filter: blur(2px);
+}
+
+/* Card / panel entry — slides up from 10px below, fades in */
+.card-enter {
+  transform: translateY(0);
+  opacity: 1;
+  transition: transform 300ms var(--ease-out), opacity 250ms ease-out;
+
+  @starting-style {
+    transform: translateY(10px);
+    opacity: 0;
+  }
+}
+
+/* Dropdown / popover entry — scales from trigger, not center */
+.dropdown-enter {
+  transform-origin: top left;
+  transform: scale(1);
+  opacity: 1;
+  transition: transform 150ms var(--ease-out), opacity 100ms ease-out;
+
+  @starting-style {
+    transform: scale(0.96);
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* ── Reliable hover overrides (dark mode safe) ────────────────────────────
+   Plain .dark descendant selectors win the cascade unconditionally.
+   Tailwind dark:hover: utilities use :is(.dark *) which can lose to plain
+   hover: utilities in this project's Vite/PostCSS build pipeline.
+   Guarded by (hover: hover) so touch taps don't leave rows stuck-highlighted.
+   ─────────────────────────────────────────────────────────────────────── */
+
+@media (hover: hover) and (pointer: fine) {
+  /* Table rows: obligation lines, cycles, counterparties, dimensions */
+  .hover-row:hover {
+    background-color: oklch(0.910 0.005 264);        /* between color-12 and color-11 */
+  }
+  .dark .hover-row:hover {
+    background-color: oklch(0.248 0.010 264 / 0.55); /* color-3 at 55% — subtle lift on color-1 panels */
+  }
+
+  /* List / menu items: batch sidebar, status dropdown, cancel buttons */
+  .hover-item:hover {
+    background-color: oklch(0.910 0.005 264);        /* between color-12 and color-11 */
+  }
+  .dark .hover-item:hover {
+    background-color: oklch(0.268 0.011 264);        /* color-3 equivalent — solid lift */
+  }
+}
