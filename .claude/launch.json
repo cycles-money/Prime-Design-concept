@@ -1,0 +1,18 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "DigitalEar",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["serve", "-p", "4200", "digitalear"],
+      "port": 4200
+    },
+    {
+      "name": "cycles-prime-dev",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev", "--", "--port", "5173"],
+      "cwd": "cycles-prime-prototype",
+      "port": 5173
+    }
+  ]
+}
