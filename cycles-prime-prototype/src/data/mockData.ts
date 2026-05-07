@@ -12,6 +12,246 @@ import type { Batch, Cycle, ActivityEntry } from '../types';
 // ─────────────────────────────────────────────────────────────────────────────
 
 export const mockBatches: Batch[] = [
+  // ── TODAY 2026-05-07 ────────────────────────────────────────────────────────
+  {
+    id: 'BATCH-0091',
+    counterpartyName: 'FalconX',
+    cutoffTime: '2026-05-07 11:00',
+    status: 'Draft',
+    origin: 'created',
+    totalUsd: 4_280_000,
+    activity: [
+      { id: 'a91a', timestamp: '2026-05-07 08:05', type: 'created', description: 'Batch created', user: 'You' },
+    ] satisfies ActivityEntry[],
+    deliverObligations: [
+      { asset: 'BTC',  amountAsset: 22,         clearedAsset: 0, remainingAsset: 22,         amountUsd: 1_540_000, clearedUsd: 0, remainingUsd: 1_540_000 },
+      { asset: 'USDT', amountAsset: 750_000,    clearedAsset: 0, remainingAsset: 750_000,    amountUsd:   750_000, clearedUsd: 0, remainingUsd:   750_000 },
+    ],
+    receiveObligations: [
+      { asset: 'ETH',  amountAsset: 660,        clearedAsset: 0, remainingAsset: 660,        amountUsd: 1_650_000, clearedUsd: 0, remainingUsd: 1_650_000 },
+      { asset: 'LINK', amountAsset: 24_286,     clearedAsset: 0, remainingAsset: 24_286,     amountUsd:   340_000, clearedUsd: 0, remainingUsd:   340_000 },
+    ],
+  },
+  {
+    id: 'BATCH-0092',
+    counterpartyName: 'Cumberland DRW',
+    cutoffTime: '2026-05-07 11:00',
+    status: 'Pending',
+    origin: 'requested',
+    totalUsd: 7_840_000,
+    activity: [
+      { id: 'a92b', timestamp: '2026-05-07 09:10', type: 'status_change', description: 'Status changed to Pending', user: 'You'    },
+      { id: 'a92a', timestamp: '2026-05-06 18:30', type: 'created',       description: 'Batch imported from file',  user: 'System' },
+    ] satisfies ActivityEntry[],
+    deliverObligations: [
+      { asset: 'USDC', amountAsset: 4_500_000, clearedAsset: 0, remainingAsset: 4_500_000, amountUsd: 4_500_000, clearedUsd: 0, remainingUsd: 4_500_000 },
+      { asset: 'SOL',  amountAsset: 4_400,     clearedAsset: 0, remainingAsset: 4_400,     amountUsd:   660_000, clearedUsd: 0, remainingUsd:   660_000 },
+    ],
+    receiveObligations: [
+      { asset: 'BTC',  amountAsset: 38,        clearedAsset: 0, remainingAsset: 38,        amountUsd: 2_660_000, clearedUsd: 0, remainingUsd: 2_660_000 },
+    ],
+  },
+  {
+    id: 'BATCH-0093',
+    counterpartyName: 'Wintermute',
+    cutoffTime: '2026-05-07 11:00',
+    status: 'Approved',
+    origin: 'created',
+    totalUsd: 11_400_000,
+    activity: [
+      { id: 'a93c', timestamp: '2026-05-07 10:20', type: 'status_change', description: 'Status changed to Approved', user: 'System' },
+      { id: 'a93b', timestamp: '2026-05-07 08:55', type: 'status_change', description: 'Status changed to Pending',  user: 'You'    },
+      { id: 'a93a', timestamp: '2026-05-06 16:10', type: 'created',       description: 'Batch created',              user: 'You'    },
+    ] satisfies ActivityEntry[],
+    deliverObligations: [
+      { asset: 'BTC',  amountAsset: 70,         clearedAsset: 0, remainingAsset: 70,         amountUsd: 4_900_000, clearedUsd: 0, remainingUsd: 4_900_000 },
+      { asset: 'USDT', amountAsset: 2_400_000,  clearedAsset: 0, remainingAsset: 2_400_000,  amountUsd: 2_400_000, clearedUsd: 0, remainingUsd: 2_400_000 },
+      { asset: 'AVAX', amountAsset: 18_750,     clearedAsset: 0, remainingAsset: 18_750,     amountUsd:   600_000, clearedUsd: 0, remainingUsd:   600_000 },
+    ],
+    receiveObligations: [
+      { asset: 'ETH',  amountAsset: 1_320,      clearedAsset: 0, remainingAsset: 1_320,      amountUsd: 3_300_000, clearedUsd: 0, remainingUsd: 3_300_000 },
+      { asset: 'XRP',  amountAsset: 140_845,    clearedAsset: 0, remainingAsset: 140_845,    amountUsd:   200_000, clearedUsd: 0, remainingUsd:   200_000 },
+    ],
+  },
+  {
+    id: 'BATCH-0094',
+    counterpartyName: 'B2C2',
+    cutoffTime: '2026-05-07 11:00',
+    status: 'Draft',
+    origin: 'created',
+    totalUsd: 2_910_000,
+    activity: [
+      { id: 'a94a', timestamp: '2026-05-07 07:40', type: 'created', description: 'Batch created', user: 'You' },
+    ] satisfies ActivityEntry[],
+    deliverObligations: [
+      { asset: 'ETH',  amountAsset: 320,        clearedAsset: 0, remainingAsset: 320,        amountUsd:   800_000, clearedUsd: 0, remainingUsd:   800_000 },
+      { asset: 'USDC', amountAsset: 1_120_000,  clearedAsset: 0, remainingAsset: 1_120_000,  amountUsd: 1_120_000, clearedUsd: 0, remainingUsd: 1_120_000 },
+    ],
+    receiveObligations: [
+      { asset: 'BTC',  amountAsset: 14,         clearedAsset: 0, remainingAsset: 14,         amountUsd:   980_000, clearedUsd: 0, remainingUsd:   980_000 },
+    ],
+  },
+  {
+    id: 'BATCH-0095',
+    counterpartyName: 'Jump Trading',
+    cutoffTime: '2026-05-07 14:00',
+    status: 'Pending',
+    origin: 'requested',
+    totalUsd: 8_320_000,
+    activity: [
+      { id: 'a95b', timestamp: '2026-05-07 09:30', type: 'status_change', description: 'Status changed to Pending', user: 'You'    },
+      { id: 'a95a', timestamp: '2026-05-07 08:00', type: 'created',       description: 'Batch imported from file',  user: 'System' },
+    ] satisfies ActivityEntry[],
+    deliverObligations: [
+      { asset: 'USDC', amountAsset: 3_800_000, clearedAsset: 0, remainingAsset: 3_800_000, amountUsd: 3_800_000, clearedUsd: 0, remainingUsd: 3_800_000 },
+      { asset: 'SOL',  amountAsset: 5_800,     clearedAsset: 0, remainingAsset: 5_800,     amountUsd:   870_000, clearedUsd: 0, remainingUsd:   870_000 },
+      { asset: 'ATOM', amountAsset: 71_429,    clearedAsset: 0, remainingAsset: 71_429,    amountUsd:   500_000, clearedUsd: 0, remainingUsd:   500_000 },
+    ],
+    receiveObligations: [
+      { asset: 'BTC',  amountAsset: 36,        clearedAsset: 0, remainingAsset: 36,        amountUsd: 2_520_000, clearedUsd: 0, remainingUsd: 2_520_000 },
+      { asset: 'NEAR', amountAsset: 126_000,   clearedAsset: 0, remainingAsset: 126_000,   amountUsd:   630_000, clearedUsd: 0, remainingUsd:   630_000 },
+    ],
+  },
+  {
+    id: 'BATCH-0096',
+    counterpartyName: 'Galaxy Digital',
+    cutoffTime: '2026-05-07 11:00',
+    status: 'Draft',
+    origin: 'created',
+    totalUsd: 1_960_000,
+    activity: [
+      { id: 'a96a', timestamp: '2026-05-07 08:25', type: 'created', description: 'Batch created', user: 'You' },
+    ] satisfies ActivityEntry[],
+    deliverObligations: [
+      { asset: 'SOL',  amountAsset: 5_400,     clearedAsset: 0, remainingAsset: 5_400,     amountUsd:   810_000, clearedUsd: 0, remainingUsd:   810_000 },
+      { asset: 'APT',  amountAsset: 33_333,    clearedAsset: 0, remainingAsset: 33_333,    amountUsd:   300_000, clearedUsd: 0, remainingUsd:   300_000 },
+    ],
+    receiveObligations: [
+      { asset: 'BTC',  amountAsset: 9,         clearedAsset: 0, remainingAsset: 9,         amountUsd:   630_000, clearedUsd: 0, remainingUsd:   630_000 },
+      { asset: 'USDC', amountAsset: 220_000,   clearedAsset: 0, remainingAsset: 220_000,   amountUsd:   220_000, clearedUsd: 0, remainingUsd:   220_000 },
+    ],
+  },
+  {
+    id: 'BATCH-0097',
+    counterpartyName: 'Citadel Securities',
+    cutoffTime: '2026-05-07 14:00',
+    status: 'Approved',
+    origin: 'created',
+    totalUsd: 6_540_000,
+    activity: [
+      { id: 'a97c', timestamp: '2026-05-07 10:35', type: 'status_change', description: 'Status changed to Approved', user: 'System' },
+      { id: 'a97b', timestamp: '2026-05-07 09:00', type: 'status_change', description: 'Status changed to Pending',  user: 'You'    },
+      { id: 'a97a', timestamp: '2026-05-06 14:00', type: 'created',       description: 'Batch created',              user: 'You'    },
+    ] satisfies ActivityEntry[],
+    deliverObligations: [
+      { asset: 'ETH',  amountAsset: 1_440,     clearedAsset: 0, remainingAsset: 1_440,     amountUsd: 3_600_000, clearedUsd: 0, remainingUsd: 3_600_000 },
+      { asset: 'XRP',  amountAsset: 845_070,   clearedAsset: 0, remainingAsset: 845_070,   amountUsd: 1_200_000, clearedUsd: 0, remainingUsd: 1_200_000 },
+    ],
+    receiveObligations: [
+      { asset: 'BTC',  amountAsset: 25,        clearedAsset: 0, remainingAsset: 25,        amountUsd: 1_750_000, clearedUsd: 0, remainingUsd: 1_750_000 },
+    ],
+  },
+  {
+    id: 'BATCH-0098',
+    counterpartyName: 'Jane Street',
+    cutoffTime: '2026-05-07 11:00',
+    status: 'Pending',
+    origin: 'requested',
+    totalUsd: 12_640_000,
+    activity: [
+      { id: 'a98b', timestamp: '2026-05-07 09:20', type: 'status_change', description: 'Status changed to Pending', user: 'You'    },
+      { id: 'a98a', timestamp: '2026-05-07 07:50', type: 'created',       description: 'Batch imported from file',  user: 'System' },
+    ] satisfies ActivityEntry[],
+    deliverObligations: [
+      { asset: 'USDT', amountAsset: 6_200_000,  clearedAsset: 0, remainingAsset: 6_200_000, amountUsd: 6_200_000, clearedUsd: 0, remainingUsd: 6_200_000 },
+      { asset: 'AAVE', amountAsset: 9_231,      clearedAsset: 0, remainingAsset: 9_231,     amountUsd: 1_200_000, clearedUsd: 0, remainingUsd: 1_200_000 },
+    ],
+    receiveObligations: [
+      { asset: 'BTC',  amountAsset: 48,         clearedAsset: 0, remainingAsset: 48,        amountUsd: 3_360_000, clearedUsd: 0, remainingUsd: 3_360_000 },
+      { asset: 'SOL',  amountAsset: 9_867,      clearedAsset: 0, remainingAsset: 9_867,     amountUsd: 1_480_000, clearedUsd: 0, remainingUsd: 1_480_000 },
+      { asset: 'OP',   amountAsset: 235_294,    clearedAsset: 0, remainingAsset: 235_294,   amountUsd:   400_000, clearedUsd: 0, remainingUsd:   400_000 },
+    ],
+  },
+  {
+    id: 'BATCH-0099',
+    counterpartyName: 'Flow Traders',
+    cutoffTime: '2026-05-07 14:00',
+    status: 'Approved',
+    origin: 'created',
+    totalUsd: 5_180_000,
+    activity: [
+      { id: 'a99c', timestamp: '2026-05-07 10:50', type: 'status_change', description: 'Status changed to Approved', user: 'System' },
+      { id: 'a99b', timestamp: '2026-05-07 09:15', type: 'status_change', description: 'Status changed to Pending',  user: 'You'    },
+      { id: 'a99a', timestamp: '2026-05-06 13:30', type: 'created',       description: 'Batch created',              user: 'You'    },
+    ] satisfies ActivityEntry[],
+    deliverObligations: [
+      { asset: 'ETH',  amountAsset: 1_080,      clearedAsset: 0, remainingAsset: 1_080,     amountUsd: 2_700_000, clearedUsd: 0, remainingUsd: 2_700_000 },
+      { asset: 'XRP',  amountAsset: 528_169,    clearedAsset: 0, remainingAsset: 528_169,   amountUsd:   750_000, clearedUsd: 0, remainingUsd:   750_000 },
+    ],
+    receiveObligations: [
+      { asset: 'USDC', amountAsset: 1_730_000,  clearedAsset: 0, remainingAsset: 1_730_000, amountUsd: 1_730_000, clearedUsd: 0, remainingUsd: 1_730_000 },
+    ],
+  },
+  {
+    id: 'BATCH-0100',
+    counterpartyName: 'Virtu Financial',
+    cutoffTime: '2026-05-07 11:00',
+    status: 'Draft',
+    origin: 'created',
+    totalUsd: 3_460_000,
+    activity: [
+      { id: 'a100a', timestamp: '2026-05-07 08:10', type: 'created', description: 'Batch created', user: 'You' },
+    ] satisfies ActivityEntry[],
+    deliverObligations: [
+      { asset: 'USDT', amountAsset: 1_400_000,  clearedAsset: 0, remainingAsset: 1_400_000, amountUsd: 1_400_000, clearedUsd: 0, remainingUsd: 1_400_000 },
+      { asset: 'TRX',  amountAsset: 1_875_000,  clearedAsset: 0, remainingAsset: 1_875_000, amountUsd:   300_000, clearedUsd: 0, remainingUsd:   300_000 },
+    ],
+    receiveObligations: [
+      { asset: 'BTC',  amountAsset: 19,         clearedAsset: 0, remainingAsset: 19,        amountUsd: 1_330_000, clearedUsd: 0, remainingUsd: 1_330_000 },
+      { asset: 'TON',  amountAsset: 78_182,     clearedAsset: 0, remainingAsset: 78_182,    amountUsd:   430_000, clearedUsd: 0, remainingUsd:   430_000 },
+    ],
+  },
+  {
+    id: 'BATCH-0101',
+    counterpartyName: 'FalconX',
+    cutoffTime: '2026-05-07 16:00',
+    status: 'Pending',
+    origin: 'created',
+    totalUsd: 5_720_000,
+    activity: [
+      { id: 'a101b', timestamp: '2026-05-07 09:45', type: 'status_change', description: 'Status changed to Pending', user: 'You' },
+      { id: 'a101a', timestamp: '2026-05-07 08:30', type: 'created',       description: 'Batch created',             user: 'You' },
+    ] satisfies ActivityEntry[],
+    deliverObligations: [
+      { asset: 'BTC',  amountAsset: 32,         clearedAsset: 0, remainingAsset: 32,        amountUsd: 2_240_000, clearedUsd: 0, remainingUsd: 2_240_000 },
+    ],
+    receiveObligations: [
+      { asset: 'USDC', amountAsset: 2_400_000,  clearedAsset: 0, remainingAsset: 2_400_000, amountUsd: 2_400_000, clearedUsd: 0, remainingUsd: 2_400_000 },
+      { asset: 'DOT',  amountAsset: 166_154,    clearedAsset: 0, remainingAsset: 166_154,   amountUsd: 1_080_000, clearedUsd: 0, remainingUsd: 1_080_000 },
+    ],
+  },
+  {
+    id: 'BATCH-0102',
+    counterpartyName: 'Wintermute',
+    cutoffTime: '2026-05-07 16:00',
+    status: 'Approved',
+    origin: 'requested',
+    totalUsd: 9_870_000,
+    activity: [
+      { id: 'a102c', timestamp: '2026-05-07 10:30', type: 'status_change', description: 'Status changed to Approved', user: 'System' },
+      { id: 'a102b', timestamp: '2026-05-07 08:40', type: 'status_change', description: 'Status changed to Pending',  user: 'You'    },
+      { id: 'a102a', timestamp: '2026-05-06 17:00', type: 'created',       description: 'Batch imported from file',   user: 'System' },
+    ] satisfies ActivityEntry[],
+    deliverObligations: [
+      { asset: 'BTC',  amountAsset: 60,         clearedAsset: 0, remainingAsset: 60,        amountUsd: 4_200_000, clearedUsd: 0, remainingUsd: 4_200_000 },
+      { asset: 'USDC', amountAsset: 2_100_000,  clearedAsset: 0, remainingAsset: 2_100_000, amountUsd: 2_100_000, clearedUsd: 0, remainingUsd: 2_100_000 },
+    ],
+    receiveObligations: [
+      { asset: 'ETH',  amountAsset: 1_180,      clearedAsset: 0, remainingAsset: 1_180,     amountUsd: 2_950_000, clearedUsd: 0, remainingUsd: 2_950_000 },
+      { asset: 'MATIC', amountAsset: 1_127_273, clearedAsset: 0, remainingAsset: 1_127_273, amountUsd:   620_000, clearedUsd: 0, remainingUsd:   620_000 },
+    ],
+  },
+
   // ── TODAY 2026-04-29 ────────────────────────────────────────────────────────
   {
     id: 'BATCH-0053',

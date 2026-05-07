@@ -296,20 +296,46 @@ function TricklingPanel({
               Manage →
             </button>
           </div>
-          <div className="flex items-center gap-1 bg-gray-100 dark:bg-[var(--surface-3)] rounded-full p-0.5">
-            {(['asset', 'batches'] as const).map((v) => (
-              <button
-                key={v}
-                onClick={() => setBreakdown(v)}
-                className={`text-[10px] font-medium px-2.5 py-1 rounded-full transition-colors capitalize ${
-                  breakdown === v
-                    ? 'bg-white dark:bg-[var(--color-2)] text-gray-800 dark:text-gray-100 shadow-sm'
-                    : 'text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300'
-                }`}
-              >
-                {v === 'batches' ? 'Batches' : 'Assets'}
-              </button>
-            ))}
+          <div className="flex items-center gap-2">
+            {breakdown === 'asset' && (() => {
+              const assetNames = (() => {
+                const set = new Set<string>();
+                batches.forEach((b) => {
+                  b.deliverObligations.forEach((ob) => set.add(ob.asset));
+                  b.receiveObligations.forEach((ob) => set.add(ob.asset));
+                });
+                return [...set];
+              })();
+              const allExpanded = assetNames.length > 0 && assetNames.every((k) => expandedAssets.has(k));
+              return (
+                <button
+                  onClick={() => setExpandedAssets(allExpanded ? new Set() : new Set(assetNames))}
+                  disabled={assetNames.length === 0}
+                  aria-label={allExpanded ? 'Collapse all' : 'Expand all'}
+                  className="flex items-center gap-1 text-[10px] font-medium text-gray-500 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200 border border-gray-200 dark:border-[var(--border)] hover:border-gray-300 dark:hover:border-gray-500 rounded-full px-2.5 py-1 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  {allExpanded
+                    ? <ChevronsDownUp aria-hidden="true" className="w-3 h-3" strokeWidth={2} />
+                    : <ChevronsUpDown aria-hidden="true" className="w-3 h-3" strokeWidth={2} />}
+                  {allExpanded ? 'Collapse all' : 'Expand all'}
+                </button>
+              );
+            })()}
+            <div className="flex items-center gap-1 bg-gray-100 dark:bg-[var(--surface-3)] rounded-full p-0.5">
+              {(['asset', 'batches'] as const).map((v) => (
+                <button
+                  key={v}
+                  onClick={() => setBreakdown(v)}
+                  className={`text-[10px] font-medium px-2.5 py-1 rounded-full transition-colors capitalize ${
+                    breakdown === v
+                      ? 'bg-white dark:bg-[var(--color-2)] text-gray-800 dark:text-gray-100 shadow-sm'
+                      : 'text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300'
+                  }`}
+                >
+                  {v === 'batches' ? 'Batches' : 'Assets'}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
 

@@ -3,8 +3,10 @@ import React, {
   useRef,
   useCallback,
   useEffect,
+  useLayoutEffect,
   KeyboardEvent,
 } from 'react';
+import { createPortal } from 'react-dom';
 import { mockBatches, mockCycles } from '../data/mockData';
 import type { Batch, BatchStatus, Obligation, SettlementTarget, ActivityEntry, ActivityEventType } from '../types';
 import LinkSettlementModal from './LinkSettlementModal';
@@ -221,6 +223,162 @@ const ASSET_USD: Record<string, number> = {
   BTC: 70_000, ETH: 2_500, SOL: 150, XRP: 1.42,
   USDT: 1, USDC: 1, USD: 1, DAI: 1, BNB: 580, MATIC: 0.7, ADA: 0.45,
 };
+
+// ── Asset list + custom AssetSelect dropdown ───────────────────────────────
+
+const ASSET_LIST: { symbol: string; name: string }[] = [
+  { symbol: 'BTC',   name: 'Bitcoin' },
+  { symbol: 'ETH',   name: 'Ethereum' },
+  { symbol: 'USDC',  name: 'USD Coin' },
+  { symbol: 'USDT',  name: 'Tether' },
+  { symbol: 'SOL',   name: 'Solana' },
+  { symbol: 'BNB',   name: 'BNB' },
+  { symbol: 'XRP',   name: 'XRP' },
+  { symbol: 'ADA',   name: 'Cardano' },
+  { symbol: 'DOGE',  name: 'Dogecoin' },
+  { symbol: 'LINK',  name: 'Chainlink' },
+  { symbol: 'AVAX',  name: 'Avalanche' },
+  { symbol: 'DOT',   name: 'Polkadot' },
+  { symbol: 'MATIC', name: 'Polygon' },
+  { symbol: 'ATOM',  name: 'Cosmos' },
+  { symbol: 'NEAR',  name: 'NEAR Protocol' },
+  { symbol: 'UNI',   name: 'Uniswap' },
+  { symbol: 'AAVE',  name: 'Aave' },
+  { symbol: 'LTC',   name: 'Litecoin' },
+  { symbol: 'BCH',   name: 'Bitcoin Cash' },
+  { symbol: 'ARB',   name: 'Arbitrum' },
+  { symbol: 'OP',    name: 'Optimism' },
+  { symbol: 'APT',   name: 'Aptos' },
+  { symbol: 'SUI',   name: 'Sui' },
+  { symbol: 'LDO',   name: 'Lido DAO' },
+  { symbol: 'MKR',   name: 'Maker' },
+  { symbol: 'TON',   name: 'Toncoin' },
+  { symbol: 'TRX',   name: 'TRON' },
+  { symbol: 'XLM',   name: 'Stellar' },
+  { symbol: 'FIL',   name: 'Filecoin' },
+  { symbol: 'SHIB',  name: 'Shiba Inu' },
+  { symbol: 'PEPE',  name: 'Pepe' },
+  { symbol: 'HBAR',  name: 'Hedera' },
+  { symbol: 'ICP',   name: 'Internet Computer' },
+  { symbol: 'WBTC',  name: 'Wrapped Bitcoin' },
+  { symbol: 'ALGO',  name: 'Algorand' },
+  { symbol: 'DAI',   name: 'Dai' },
+];
+
+function AssetSelect({ value, onChange, ariaLabel = 'Asset' }: {
+  value: string;
+  onChange: (next: string) => void;
+  ariaLabel?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState('');
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+  const [pos, setPos] = useState<{ top: number; left: number; width: number } | null>(null);
+
+  // Position the portal panel anchored under the trigger; flip to top if it
+  // would clip the viewport bottom.
+  useLayoutEffect(() => {
+    if (!open || !buttonRef.current) return;
+    const update = () => {
+      const r = buttonRef.current!.getBoundingClientRect();
+      const panelH = 320; // estimate (search + max-h-64 list)
+      const minW = 260;
+      const top = r.bottom + 4 + panelH > window.innerHeight && r.top - 4 - panelH > 0
+        ? r.top - 4 - panelH
+        : r.bottom + 4;
+      const left = Math.min(Math.max(8, r.left), window.innerWidth - minW - 8);
+      setPos({ top, left, width: Math.max(minW, r.width) });
+    };
+    update();
+    window.addEventListener('scroll', update, true);
+    window.addEventListener('resize', update);
+    return () => {
+      window.removeEventListener('scroll', update, true);
+      window.removeEventListener('resize', update);
+    };
+  }, [open]);
+
+  // Close on outside click — treat the portaled panel as part of the component.
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: MouseEvent) => {
+      const target = e.target as Node;
+      if (buttonRef.current?.contains(target)) return;
+      if (panelRef.current?.contains(target)) return;
+      setOpen(false);
+      setSearch('');
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [open]);
+
+  const filtered = ASSET_LIST.filter((a) => {
+    const q = search.toLowerCase();
+    return a.symbol.toLowerCase().includes(q) || a.name.toLowerCase().includes(q);
+  });
+
+  return (
+    <>
+      <button
+        ref={buttonRef}
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        aria-label={ariaLabel}
+        className="flex items-center gap-1.5 text-[11px] font-semibold bg-transparent border border-transparent hover:border-gray-200 dark:hover:border-[var(--border)] focus:border-[var(--color-700)] focus:outline-none rounded px-1.5 py-0.5 text-gray-800 dark:text-gray-200 cursor-pointer"
+      >
+        <CryptoIcon symbol={value} size={16} />
+        <span>{value}</span>
+        <ChevronDown aria-hidden="true" className={`w-3 h-3 text-gray-400 dark:text-gray-500 flex-shrink-0 transition-transform duration-150 ${open ? 'rotate-180' : ''}`} strokeWidth={2} />
+      </button>
+      {open && pos && createPortal(
+        <div
+          ref={panelRef}
+          className="fixed bg-white dark:bg-[var(--color-2)] border border-gray-200 dark:border-[var(--border)] rounded-xl shadow-xl overflow-hidden z-[1000] dropdown-enter"
+          style={{ top: pos.top, left: pos.left, width: pos.width }}
+        >
+          <div className="p-2">
+            <input
+              type="text"
+              placeholder="Search asset…"
+              aria-label="Search assets"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="w-full text-2xs bg-gray-50 dark:bg-[var(--surface-3)] border border-gray-200 dark:border-[var(--border)] rounded-md px-2 py-1 text-gray-700 dark:text-gray-200 focus:outline-none focus:ring-1 focus:ring-[var(--color-700)]"
+              autoFocus
+            />
+          </div>
+          <div className="max-h-64 overflow-y-auto pb-1">
+            {filtered.length === 0 ? (
+              <div className="px-3 py-3 text-center text-2xs text-gray-400 dark:text-gray-500">No matches.</div>
+            ) : (
+              filtered.map((a) => (
+                <button
+                  key={a.symbol}
+                  type="button"
+                  onClick={() => { onChange(a.symbol); setOpen(false); setSearch(''); }}
+                  className="w-full flex items-center gap-2 px-3 py-1.5 text-2xs hover-item transition-colors text-left"
+                >
+                  <CryptoIcon symbol={a.symbol} size={18} />
+                  <div className="flex-1 min-w-0 flex items-baseline gap-1.5">
+                    <span className="font-semibold text-gray-800 dark:text-gray-100">{a.symbol}</span>
+                    <span className="text-gray-500 dark:text-gray-400 truncate">{a.name}</span>
+                  </div>
+                  {a.symbol === value && (
+                    <Check aria-hidden="true" className="w-3 h-3 text-[var(--color-700)] dark:text-[var(--color-300)] flex-shrink-0" strokeWidth={2.5} />
+                  )}
+                </button>
+              ))
+            )}
+          </div>
+        </div>,
+        document.body
+      )}
+    </>
+  );
+}
 
 // ── Combined obligation table (Deliver + Receive in one) ─────────────────────
 
@@ -486,28 +644,18 @@ function CombinedObligationTable({
                         {/* Asset */}
                         <td className="pl-4 pr-2 py-2 w-20">
                           {isEditable ? (
-                            <div className="flex items-center gap-1.5">
-                              <CryptoIcon symbol={ob.asset} size={16} />
-                              <select
-                                value={ob.asset}
-                                onChange={(e) => {
-                                  const asset = e.target.value;
-                                  const price = ASSET_USD[asset] ?? 1;
-                                  const newUsd = ob.amountAsset * price;
-                                  const update = isDeliver ? onUpdateDeliver : onUpdateReceive;
-                                  update(idx, 'asset' as keyof Obligation, asset);
-                                  update(idx, 'amountUsd', newUsd);
-                                  update(idx, 'remainingAsset', ob.amountAsset - ob.clearedAsset);
-                                  update(idx, 'remainingUsd', newUsd - ob.clearedUsd);
-                                }}
-                                className="text-[11px] font-semibold bg-transparent border border-transparent hover:border-gray-200 dark:hover:border-[var(--border)] focus:border-[var(--color-700)] focus:outline-none rounded px-1 py-0.5 text-gray-800 dark:text-gray-200 cursor-pointer"
-                                aria-label="Asset"
-                              >
-                                {['BTC','ETH','USDC','USDT','SOL','BNB','XRP','ADA','MATIC','DAI'].map(a => (
-                                  <option key={a} value={a}>{a}</option>
-                                ))}
-                              </select>
-                            </div>
+                            <AssetSelect
+                              value={ob.asset}
+                              onChange={(asset) => {
+                                const price = ASSET_USD[asset] ?? 1;
+                                const newUsd = ob.amountAsset * price;
+                                const update = isDeliver ? onUpdateDeliver : onUpdateReceive;
+                                update(idx, 'asset' as keyof Obligation, asset);
+                                update(idx, 'amountUsd', newUsd);
+                                update(idx, 'remainingAsset', ob.amountAsset - ob.clearedAsset);
+                                update(idx, 'remainingUsd', newUsd - ob.clearedUsd);
+                              }}
+                            />
                           ) : (
                             <span className="flex items-center gap-1.5 font-semibold text-gray-800 dark:text-gray-200">
                               <CryptoIcon symbol={ob.asset} size={16} />
@@ -671,24 +819,14 @@ function CombinedObligationTable({
                     {newRow?.dir === dir && (
                       <tr className={`border-t border-gray-100 dark:border-[var(--border)] bg-[var(--color-50)]/40 dark:bg-[var(--color-950)]/10 ${isDeliver ? 'row-deliver' : 'row-receive'}`}>
                         <td className="pl-4 pr-2 py-2 w-20">
-                          <div className="flex items-center gap-1.5">
-                            <CryptoIcon symbol={newRow.asset} size={16} />
-                            <select
-                              value={newRow.asset}
-                              onChange={(e) => {
-                                const asset = e.target.value;
-                                const price = ASSET_USD[asset] ?? 1;
-                                const amtAsset = parseFloat(newRow.amountAsset) || 0;
-                                setNewRow({ ...newRow, asset, amountUsd: amtAsset > 0 ? String((amtAsset * price).toFixed(2)) : '' });
-                              }}
-                              className="text-[11px] font-semibold bg-transparent border border-transparent hover:border-gray-200 dark:hover:border-[var(--border)] focus:border-[var(--color-700)] focus:outline-none rounded px-1 py-0.5 text-gray-800 dark:text-gray-200 cursor-pointer"
-                              aria-label="Asset"
-                            >
-                              {['BTC','ETH','USDC','USDT','SOL','BNB','XRP','ADA','MATIC','DAI'].map(a => (
-                                <option key={a} value={a}>{a}</option>
-                              ))}
-                            </select>
-                          </div>
+                          <AssetSelect
+                            value={newRow.asset}
+                            onChange={(asset) => {
+                              const price = ASSET_USD[asset] ?? 1;
+                              const amtAsset = parseFloat(newRow.amountAsset) || 0;
+                              setNewRow({ ...newRow, asset, amountUsd: amtAsset > 0 ? String((amtAsset * price).toFixed(2)) : '' });
+                            }}
+                          />
                         </td>
                         <td className="px-2 py-2 text-right tabular-nums">
                           <input
@@ -821,6 +959,7 @@ function CombinedObligationTable({
 interface BatchDetailProps {
   batch: Batch;
   onUpdate: (updated: Batch) => void;
+  onDelete?: (id: string) => void;
 }
 
 // ── Activity card ─────────────────────────────────────────────────────────────
@@ -896,10 +1035,11 @@ function ActivityCard({ entries }: { entries: ActivityEntry[] }) {
   );
 }
 
-function BatchDetail({ batch, onUpdate }: BatchDetailProps) {
+function BatchDetail({ batch, onUpdate, onDelete }: BatchDetailProps) {
   const [showGuide, setShowGuide] = useState(false);
   const [settlementTarget, setSettlementTarget] = useState<SettlementTarget | null>(null);
   const [confirmingReject, setConfirmingReject] = useState(false);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
 
   const handleSettleWithLynq = (ob: Obligation) => {
     setSettlementTarget({
@@ -1052,6 +1192,36 @@ function BatchDetail({ batch, onUpdate }: BatchDetailProps) {
               >
                 Cancel
               </button>
+            )}
+            {/* Delete — Draft only (sender) */}
+            {batch.status === 'Draft' && batch.origin === 'created' && onDelete && (
+              confirmingDelete ? (
+                <div className="flex items-center gap-1.5">
+                  <span className="text-xs text-red-600 dark:text-red-400 font-medium whitespace-nowrap">Delete this draft?</span>
+                  <button
+                    onClick={() => { onDelete(batch.id); setConfirmingDelete(false); }}
+                    className="h-8 flex items-center gap-1 px-3 rounded-full text-xs font-semibold bg-red-500 text-white hover:bg-red-600 transition-colors duration-150 active:scale-[0.97] whitespace-nowrap"
+                  >
+                    <Trash2 aria-hidden="true" className="w-3 h-3" strokeWidth={2.5} />
+                    Confirm
+                  </button>
+                  <button
+                    onClick={() => setConfirmingDelete(false)}
+                    className="h-8 flex items-center px-3 rounded-full text-xs font-semibold bg-gray-100 dark:bg-[var(--surface-3)] text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-[var(--surface-2)] transition-colors duration-150 active:scale-[0.97]"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              ) : (
+                <button
+                  onClick={() => setConfirmingDelete(true)}
+                  aria-label="Delete draft"
+                  className="h-8 flex items-center gap-1 px-3 rounded-full text-xs font-semibold text-red-600 dark:text-red-400 border border-red-200 dark:border-red-800 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors duration-150 active:scale-[0.97] whitespace-nowrap"
+                >
+                  <Trash2 aria-hidden="true" className="w-3 h-3" strokeWidth={2.5} />
+                  Delete
+                </button>
+              )
             )}
             {/* Terminal state pill — only Cleared is shown here; other terminal states are indicated in the batch body */}
             {batch.status === 'Cleared' && (
@@ -1258,21 +1428,33 @@ function BatchDetail({ batch, onUpdate }: BatchDetailProps) {
 
 // ── Import: types ─────────────────────────────────────────────────────────────
 
+type ObligationIssue = 'missing_amount' | 'ambiguous_direction';
+type BatchIssue = 'unknown_counterparty';
+
 interface ParsedObligation {
-  direction: 'deliver' | 'receive';
+  direction: 'deliver' | 'receive' | 'unknown';
   asset: string;
   amountAsset: number;
   amountUsd: number;
+  /** Per-row issues that need user resolution before submit. */
+  issues?: ObligationIssue[];
+  /** Hint text explaining how the parser reached this row (shown in review). */
+  hint?: string;
 }
 
 interface ParsedBatch {
   id?: string;
   counterpartyName: string;
+  /** True if the parser couldn't determine a counterparty (defaulted name). */
+  counterpartyResolved: boolean;
   obligations: ParsedObligation[];
+  /** Per-batch issues. */
+  issues?: BatchIssue[];
 }
 
 interface ParseResult {
   batches: ParsedBatch[];
+  /** Lines that couldn't be parsed at all and were skipped. */
   warnings: string[];
 }
 
@@ -1306,23 +1488,49 @@ function parseBatchExportCsv(lines: string[]): ParseResult {
   const amtAssetIdx = idx('amount_asset');
   const amtUsdIdx   = idx('amount_usd');
 
-  if (cpIdx === -1 || dirIdx === -1) {
-    return { batches: [], warnings: ['Could not find Counterparty or Direction columns in CSV header.'] };
+  if (dirIdx === -1 && amtAssetIdx === -1) {
+    return { batches: [], warnings: ['Could not find Direction or Amount columns in CSV header.'] };
   }
 
   const batchMap = new Map<string, ParsedBatch>();
   for (let i = 1; i < lines.length; i++) {
     const cols = parseCsvLine(lines[i]);
-    const cp      = cols[cpIdx]?.trim() || 'Unknown';
+    const cpRaw   = cpIdx >= 0 ? (cols[cpIdx]?.trim() ?? '') : '';
+    const cpResolved = cpRaw.length > 0;
+    const cp      = cpResolved ? cpRaw : 'Unknown counterparty';
     const batchId = batchIdIdx >= 0 ? cols[batchIdIdx]?.trim() : undefined;
     const key     = batchId || cp;
-    const dirRaw  = (cols[dirIdx] || '').toLowerCase();
-    const direction: 'deliver' | 'receive' = dirRaw.startsWith('rec') ? 'receive' : 'deliver';
-    const asset       = tokenIdx >= 0 ? (cols[tokenIdx] || 'USD') : 'USD';
-    const amountAsset = parseFloat((cols[amtAssetIdx] || '0').replace(/,/g, '')) || 0;
-    const amountUsd   = amtUsdIdx >= 0 ? (parseFloat((cols[amtUsdIdx] || '0').replace(/,/g, '')) || 0) : 0;
-    if (!batchMap.has(key)) batchMap.set(key, { id: batchId, counterpartyName: cp, obligations: [] });
-    batchMap.get(key)!.obligations.push({ direction, asset, amountAsset, amountUsd });
+    const dirRaw  = dirIdx >= 0 ? (cols[dirIdx] || '').toLowerCase().trim() : '';
+
+    // Sign-based direction fallback: negative amount = deliver, positive = receive.
+    const amtRaw = (cols[amtAssetIdx] ?? '0').replace(/,/g, '').trim();
+    const amtSigned = parseFloat(amtRaw);
+    const hasAmount = !Number.isNaN(amtSigned) && amtSigned !== 0;
+    const amountAsset = hasAmount ? Math.abs(amtSigned) : 0;
+    const usdRaw = amtUsdIdx >= 0 ? (cols[amtUsdIdx] ?? '0').replace(/,/g, '').trim() : '0';
+    const usdSigned = parseFloat(usdRaw);
+    const amountUsd  = !Number.isNaN(usdSigned) ? Math.abs(usdSigned) : 0;
+
+    let direction: ParsedObligation['direction'];
+    const obIssues: ObligationIssue[] = [];
+    if (dirRaw.startsWith('rec')) direction = 'receive';
+    else if (dirRaw.startsWith('del') || dirRaw.startsWith('pay') || dirRaw.startsWith('send')) direction = 'deliver';
+    else if (hasAmount && amtSigned < 0) direction = 'deliver';
+    else if (hasAmount && amtSigned > 0) direction = 'receive';
+    else { direction = 'unknown'; obIssues.push('ambiguous_direction'); }
+
+    if (!hasAmount) obIssues.push('missing_amount');
+
+    const asset = (tokenIdx >= 0 ? cols[tokenIdx] : '')?.trim().toUpperCase() || 'USD';
+
+    if (!batchMap.has(key)) batchMap.set(key, {
+      id: batchId, counterpartyName: cp, counterpartyResolved: cpResolved, obligations: [],
+      issues: cpResolved ? [] : ['unknown_counterparty'],
+    });
+    const ob: ParsedObligation = { direction, asset, amountAsset, amountUsd };
+    if (obIssues.length) ob.issues = obIssues;
+    if (!dirRaw && hasAmount) ob.hint = `Direction inferred from sign (${amtSigned < 0 ? 'negative → deliver' : 'positive → receive'}). Confirm.`;
+    batchMap.get(key)!.obligations.push(ob);
   }
   return { batches: Array.from(batchMap.values()), warnings };
 }
@@ -1334,21 +1542,48 @@ function parsePositionCsv(lines: string[]): ParseResult {
 
   const qtyIdx   = idx('quantity') >= 0 ? idx('quantity') : idx('qty') >= 0 ? idx('qty') : 0;
   const assetIdx = idx('asset') >= 0 ? idx('asset') : idx('token') >= 0 ? idx('token') : 1;
-  const dirIdx   = idx('direction') >= 0 ? idx('direction') : idx('settlement') >= 0 ? idx('settlement') : 2;
-  const usdIdx   = idx('usd') >= 0 ? idx('usd') : idx('notional') >= 0 ? idx('notional') : 3;
+  const dirIdx   = idx('direction') >= 0 ? idx('direction') : idx('settlement') >= 0 ? idx('settlement') : -1;
+  const usdIdx   = idx('usd') >= 0 ? idx('usd') : idx('notional') >= 0 ? idx('notional') : -1;
   const cpIdx    = idx('counterparty') >= 0 ? idx('counterparty') : -1;
 
   const batchMap = new Map<string, ParsedBatch>();
   for (let i = 1; i < lines.length; i++) {
     const cols    = parseCsvLine(lines[i]);
-    const cpName  = cpIdx >= 0 ? (cols[cpIdx]?.trim() || 'Imported Batch') : 'Imported Batch';
-    const dirRaw  = (cols[dirIdx] || '').toLowerCase();
-    const direction: 'deliver' | 'receive' = dirRaw.startsWith('rec') ? 'receive' : 'deliver';
-    const asset       = cols[assetIdx]?.trim() || 'USD';
-    const amountAsset = parseFloat((cols[qtyIdx] || '0').replace(/,/g, '')) || 0;
-    const amountUsd   = parseFloat((cols[usdIdx] || '0').replace(/,/g, '')) || 0;
-    if (!batchMap.has(cpName)) batchMap.set(cpName, { counterpartyName: cpName, obligations: [] });
-    batchMap.get(cpName)!.obligations.push({ direction, asset, amountAsset, amountUsd });
+    const cpRaw   = cpIdx >= 0 ? (cols[cpIdx]?.trim() ?? '') : '';
+    const cpResolved = cpRaw.length > 0;
+    const cpName  = cpResolved ? cpRaw : 'Unknown counterparty';
+
+    const dirRaw  = dirIdx >= 0 ? (cols[dirIdx] || '').toLowerCase().trim() : '';
+    const qtyRaw  = (cols[qtyIdx] ?? '0').replace(/,/g, '').trim();
+    const qtySigned = parseFloat(qtyRaw);
+    const hasAmount = !Number.isNaN(qtySigned) && qtySigned !== 0;
+    const amountAsset = hasAmount ? Math.abs(qtySigned) : 0;
+
+    const usdRaw = usdIdx >= 0 ? (cols[usdIdx] ?? '0').replace(/,/g, '').trim() : '0';
+    const usdSigned = parseFloat(usdRaw);
+    const amountUsd  = !Number.isNaN(usdSigned) ? Math.abs(usdSigned) : 0;
+
+    let direction: ParsedObligation['direction'];
+    let hint: string | undefined;
+    const obIssues: ObligationIssue[] = [];
+    if (dirRaw.startsWith('rec')) direction = 'receive';
+    else if (dirRaw.startsWith('del') || dirRaw.startsWith('pay') || dirRaw.startsWith('send')) direction = 'deliver';
+    else if (hasAmount && qtySigned < 0) { direction = 'deliver'; hint = 'Direction inferred from negative amount (negative → deliver). Confirm.'; }
+    else if (hasAmount && qtySigned > 0) { direction = 'receive'; hint = 'Direction inferred from positive amount (positive → receive). Confirm.'; }
+    else { direction = 'unknown'; obIssues.push('ambiguous_direction'); }
+
+    if (!hasAmount) obIssues.push('missing_amount');
+
+    const asset = cols[assetIdx]?.trim().toUpperCase() || 'USD';
+
+    if (!batchMap.has(cpName)) batchMap.set(cpName, {
+      counterpartyName: cpName, counterpartyResolved: cpResolved, obligations: [],
+      issues: cpResolved ? [] : ['unknown_counterparty'],
+    });
+    const ob: ParsedObligation = { direction, asset, amountAsset, amountUsd };
+    if (obIssues.length) ob.issues = obIssues;
+    if (hint) ob.hint = hint;
+    batchMap.get(cpName)!.obligations.push(ob);
   }
   if (batchMap.size === 0) warnings.push('No data rows found in CSV.');
   return { batches: Array.from(batchMap.values()), warnings };
@@ -1367,11 +1602,15 @@ function parseNaturalLanguage(lines: string[]): ParseResult {
     }
     const cpName    = m[1].trim();
     const verb      = m[2].toLowerCase();
-    const direction: 'deliver' | 'receive' = (verb.startsWith('rec')) ? 'receive' : 'deliver';
+    const direction: ParsedObligation['direction'] = verb.startsWith('rec') ? 'receive' : 'deliver';
     const amountAsset = parseFloat(m[3].replace(/[,_]/g, '')) || 0;
     const asset       = m[4].toUpperCase();
-    if (!batchMap.has(cpName)) batchMap.set(cpName, { counterpartyName: cpName, obligations: [] });
-    batchMap.get(cpName)!.obligations.push({ direction, asset, amountAsset, amountUsd: 0 });
+    const obIssues: ObligationIssue[] = [];
+    if (amountAsset === 0) obIssues.push('missing_amount');
+    if (!batchMap.has(cpName)) batchMap.set(cpName, { counterpartyName: cpName, counterpartyResolved: true, obligations: [] });
+    const ob: ParsedObligation = { direction, asset, amountAsset, amountUsd: 0 };
+    if (obIssues.length) ob.issues = obIssues;
+    batchMap.get(cpName)!.obligations.push(ob);
   }
   return { batches: Array.from(batchMap.values()), warnings };
 }
@@ -1411,6 +1650,7 @@ function buildBatch(parsed: ParsedBatch): Batch {
 interface ImportModalProps {
   onConfirm: (batches: Batch[]) => void;
   onClose: () => void;
+  existingCounterparties: string[];
 }
 
 type ImportStep = 'upload' | 'validate' | 'review' | 'submit' | 'complete';
@@ -1425,7 +1665,7 @@ const STEP_LABELS: Record<ImportStep, string> = {
   complete: 'Done',
 };
 
-function ImportModal({ onConfirm, onClose }: ImportModalProps) {
+function ImportModal({ onConfirm, onClose, existingCounterparties }: ImportModalProps) {
   const [step, setStep] = useState<ImportStep>('upload');
   const [raw, setRaw] = useState('');
   const [fileName, setFileName] = useState<string | null>(null);
@@ -1530,12 +1770,48 @@ function ImportModal({ onConfirm, onClose }: ImportModalProps) {
   const n = parseResult?.batches.length ?? 0;
   const fileSizeKb = fileSize > 0 ? (fileSize / 1024).toFixed(1) : null;
 
+  // Aggregate issue counts across the parsed result.
+  const issueCounts = (() => {
+    if (!parseResult) return { unknownCp: 0, ambiguousDir: 0, missingAmount: 0, total: 0 };
+    let unknownCp = 0, ambiguousDir = 0, missingAmount = 0;
+    parseResult.batches.forEach((b) => {
+      if (!b.counterpartyResolved) unknownCp++;
+      b.obligations.forEach((o) => {
+        if (o.issues?.includes('ambiguous_direction')) ambiguousDir++;
+        if (o.issues?.includes('missing_amount')) missingAmount++;
+      });
+    });
+    return { unknownCp, ambiguousDir, missingAmount, total: unknownCp + ambiguousDir + missingAmount };
+  })();
+  const hasUnresolvedIssues = issueCounts.total > 0;
+
+  // Mutator: update a parsed batch (e.g., resolve counterparty).
+  const updateBatch = (batchIdx: number, patch: Partial<ParsedBatch>) => {
+    setParseResult((prev) => {
+      if (!prev) return prev;
+      const batches = prev.batches.map((b, i) => i === batchIdx ? { ...b, ...patch } : b);
+      return { ...prev, batches };
+    });
+  };
+  // Mutator: update a parsed obligation row.
+  const updateObligation = (batchIdx: number, obIdx: number, patch: Partial<ParsedObligation>) => {
+    setParseResult((prev) => {
+      if (!prev) return prev;
+      const batches = prev.batches.map((b, i) => {
+        if (i !== batchIdx) return b;
+        const obligations = b.obligations.map((o, j) => j === obIdx ? { ...o, ...patch } : o);
+        return { ...b, obligations };
+      });
+      return { ...prev, batches };
+    });
+  };
+
   const currentStepIdx = STEP_ORDER.indexOf(step);
   const canGoNext = (() => {
     if (step === 'upload') return raw.trim().length > 0;
     if (step === 'validate') return parseResult !== null && parseResult.batches.length > 0;
-    if (step === 'review') return true;
-    if (step === 'submit') return true;
+    if (step === 'review') return !hasUnresolvedIssues;
+    if (step === 'submit') return !hasUnresolvedIssues;
     return false;
   })();
 
@@ -1684,29 +1960,55 @@ function ImportModal({ onConfirm, onClose }: ImportModalProps) {
                   <p className="text-lg font-bold tabular-nums text-gray-900 dark:text-gray-100 mt-0.5">{totalObl}</p>
                 </div>
                 <div className="px-3 py-2.5 bg-gray-50 dark:bg-[var(--surface-3)] rounded-lg">
-                  <p className="text-2xs text-gray-500 dark:text-gray-400 uppercase tracking-wide font-medium">Issues</p>
-                  <p className={`text-lg font-bold tabular-nums mt-0.5 ${parseResult.warnings.length > 0 ? 'text-amber-600 dark:text-amber-400' : 'text-[var(--positive)]'}`}>
-                    {parseResult.warnings.length}
+                  <p className="text-2xs text-gray-500 dark:text-gray-400 uppercase tracking-wide font-medium">Needs attention</p>
+                  <p className={`text-lg font-bold tabular-nums mt-0.5 ${issueCounts.total > 0 ? 'text-amber-600 dark:text-amber-400' : 'text-[var(--positive)]'}`}>
+                    {issueCounts.total}
                   </p>
                 </div>
               </div>
 
-              {parseResult.warnings.length === 0 ? (
-                <div className="flex items-center gap-2 px-3 py-2.5 bg-[var(--positive)]/10 border border-[var(--positive)]/30 rounded-lg">
-                  <CheckCircle aria-hidden="true" className="w-4 h-4 text-[var(--positive)] flex-shrink-0" strokeWidth={2} />
-                  <p className="text-xs text-gray-700 dark:text-gray-200 font-medium">All lines parsed successfully.</p>
-                </div>
-              ) : (
-                <div className="px-3 py-2.5 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg">
-                  <div className="flex items-start gap-2 mb-2">
+              {/* Per-issue breakdown — actionable, fixed in Review */}
+              {issueCounts.total > 0 && (
+                <div className="px-3 py-2.5 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg space-y-2">
+                  <div className="flex items-start gap-2">
                     <AlertCircle aria-hidden="true" className="w-4 h-4 text-amber-600 dark:text-amber-400 flex-shrink-0 mt-0.5" strokeWidth={2} />
-                    <p className="text-xs font-semibold text-amber-700 dark:text-amber-400">
-                      {parseResult.warnings.length} {parseResult.warnings.length === 1 ? 'line was' : 'lines were'} skipped
+                    <div className="flex-1">
+                      <p className="text-xs font-semibold text-amber-700 dark:text-amber-400 mb-1.5">
+                        Some rows need your input before they can be imported
+                      </p>
+                      <ul className="space-y-1 text-2xs text-amber-700 dark:text-amber-400">
+                        {issueCounts.unknownCp > 0 && (
+                          <li>
+                            <span className="font-semibold">{issueCounts.unknownCp}</span> batch{issueCounts.unknownCp !== 1 ? 'es' : ''} with no counterparty in the file — pick one in the next step.
+                          </li>
+                        )}
+                        {issueCounts.ambiguousDir > 0 && (
+                          <li>
+                            <span className="font-semibold">{issueCounts.ambiguousDir}</span> obligation{issueCounts.ambiguousDir !== 1 ? 's' : ''} where direction couldn't be inferred — confirm Deliver/Receive.
+                          </li>
+                        )}
+                        {issueCounts.missingAmount > 0 && (
+                          <li>
+                            <span className="font-semibold">{issueCounts.missingAmount}</span> obligation{issueCounts.missingAmount !== 1 ? 's' : ''} with missing or zero amount — enter a value.
+                          </li>
+                        )}
+                      </ul>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {parseResult.warnings.length > 0 && (
+                <div className="px-3 py-2.5 bg-gray-50 dark:bg-[var(--surface-3)] border border-gray-200 dark:border-[var(--border)] rounded-lg">
+                  <div className="flex items-start gap-2 mb-1.5">
+                    <Info aria-hidden="true" className="w-4 h-4 text-gray-500 dark:text-gray-400 flex-shrink-0 mt-0.5" strokeWidth={2} />
+                    <p className="text-xs font-semibold text-gray-700 dark:text-gray-200">
+                      {parseResult.warnings.length} {parseResult.warnings.length === 1 ? 'line was' : 'lines were'} skipped (unparseable)
                     </p>
                   </div>
                   <ul className="space-y-0.5 ml-6">
                     {parseResult.warnings.map((w, i) => (
-                      <li key={i} className="text-2xs text-amber-700 dark:text-amber-400">
+                      <li key={i} className="text-2xs text-gray-500 dark:text-gray-400">
                         {w}
                       </li>
                     ))}
@@ -1714,51 +2016,119 @@ function ImportModal({ onConfirm, onClose }: ImportModalProps) {
                 </div>
               )}
 
+              {issueCounts.total === 0 && parseResult.warnings.length === 0 && (
+                <div className="flex items-center gap-2 px-3 py-2.5 bg-[var(--positive)]/10 border border-[var(--positive)]/30 rounded-lg">
+                  <CheckCircle aria-hidden="true" className="w-4 h-4 text-[var(--positive)] flex-shrink-0" strokeWidth={2} />
+                  <p className="text-xs text-gray-700 dark:text-gray-200 font-medium">All rows parsed cleanly.</p>
+                </div>
+              )}
+
               <p className="text-2xs text-gray-500 dark:text-gray-400">
-                Continue to review the parsed obligations and confirm before submitting.
+                {issueCounts.total > 0
+                  ? 'Continue to Review to resolve each flagged row inline.'
+                  : 'Continue to Review the parsed obligations and confirm before submitting.'}
               </p>
             </div>
           )}
 
           {step === 'review' && parseResult && (
-            <div className="space-y-2">
-              <p className="text-2xs text-gray-500 dark:text-gray-400 mb-2">
-                {n} batch{n !== 1 ? 'es' : ''} · {totalObl} obligation{totalObl !== 1 ? 's' : ''}. Click a batch to expand.
-              </p>
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <p className="text-2xs text-gray-500 dark:text-gray-400">
+                  {n} batch{n !== 1 ? 'es' : ''} · {totalObl} obligation{totalObl !== 1 ? 's' : ''} · click a batch to expand and edit
+                </p>
+                {hasUnresolvedIssues && (
+                  <span className="inline-flex items-center gap-1 text-2xs font-semibold text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-full px-2 py-0.5">
+                    <AlertCircle aria-hidden="true" className="w-3 h-3" strokeWidth={2} />
+                    {issueCounts.total} unresolved
+                  </span>
+                )}
+              </div>
+
               {parseResult.batches.map((b, i) => {
                 const isExpanded = expandedBatches.has(i);
                 const dc = b.obligations.filter(o => o.direction === 'deliver').length;
                 const rc = b.obligations.filter(o => o.direction === 'receive').length;
+                const uc = b.obligations.filter(o => o.direction === 'unknown').length;
                 const usd = b.obligations.reduce((s, o) => s + o.amountUsd, 0);
+                const batchIssueCount = (b.counterpartyResolved ? 0 : 1)
+                  + b.obligations.filter(o => o.issues && o.issues.length > 0).length;
                 return (
-                  <div key={i} className="rounded-lg border border-gray-200 dark:border-[var(--border)] overflow-hidden">
+                  <div
+                    key={i}
+                    className={`rounded-lg border overflow-hidden ${
+                      batchIssueCount > 0
+                        ? 'border-amber-300 dark:border-amber-700 bg-amber-50/30 dark:bg-amber-900/10'
+                        : 'border-gray-200 dark:border-[var(--border)]'
+                    }`}
+                  >
                     <button
                       onClick={() => toggleBatchExpand(i)}
                       className="hover-item w-full flex items-center justify-between px-3 py-2.5 text-left transition-colors"
                       aria-expanded={isExpanded}
                     >
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-2 min-w-0">
                         <ChevronRight
                           aria-hidden="true"
                           className={`w-3 h-3 text-gray-400 dark:text-gray-500 transition-transform duration-150 flex-shrink-0 ${isExpanded ? 'rotate-90' : ''}`}
                           strokeWidth={2}
                         />
-                        <span className="text-xs font-semibold text-gray-800 dark:text-gray-200">{b.counterpartyName}</span>
-                        <span className="text-2xs text-gray-400 dark:text-gray-500">
-                          {dc} deliver · {rc} receive
+                        <span className={`text-xs font-semibold truncate ${b.counterpartyResolved ? 'text-gray-800 dark:text-gray-200' : 'text-amber-700 dark:text-amber-400'}`}>
+                          {b.counterpartyName}
+                        </span>
+                        <span className="text-2xs text-gray-400 dark:text-gray-500 whitespace-nowrap">
+                          {dc} deliver · {rc} receive{uc > 0 ? ` · ${uc} unknown` : ''}
                         </span>
                       </div>
-                      {usd > 0 && (
-                        <span className="text-2xs tabular-nums text-gray-600 dark:text-gray-300">
-                          {fmtUsdCompact(usd)}
-                        </span>
-                      )}
+                      <div className="flex items-center gap-2 flex-shrink-0">
+                        {batchIssueCount > 0 && (
+                          <span className="inline-flex items-center gap-1 text-2xs font-medium text-amber-700 dark:text-amber-400 bg-amber-100 dark:bg-amber-900/30 rounded-full px-1.5 py-0.5">
+                            <AlertCircle aria-hidden="true" className="w-2.5 h-2.5" strokeWidth={2.5} />
+                            {batchIssueCount}
+                          </span>
+                        )}
+                        {usd > 0 && (
+                          <span className="text-2xs tabular-nums text-gray-600 dark:text-gray-300">{fmtUsdCompact(usd)}</span>
+                        )}
+                      </div>
                     </button>
                     {isExpanded && (
-                      <div className="border-t border-gray-100 dark:border-[var(--border)] bg-gray-50 dark:bg-[var(--surface-3)]">
+                      <div className="border-t border-gray-100 dark:border-[var(--border)] bg-white dark:bg-[var(--color-2)]">
+                        {/* Counterparty resolver */}
+                        <div className={`flex items-center gap-3 px-3 py-2.5 border-b border-gray-100 dark:border-[var(--border)] ${
+                          !b.counterpartyResolved ? 'bg-amber-50 dark:bg-amber-900/10' : ''
+                        }`}>
+                          <span className="text-2xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide w-24 flex-shrink-0">
+                            Counterparty
+                          </span>
+                          <select
+                            value={existingCounterparties.includes(b.counterpartyName) ? b.counterpartyName : '__custom__'}
+                            onChange={(e) => {
+                              const v = e.target.value;
+                              if (v === '__custom__') return;
+                              updateBatch(i, { counterpartyName: v, counterpartyResolved: true, issues: (b.issues ?? []).filter(x => x !== 'unknown_counterparty') });
+                            }}
+                            className="flex-1 text-xs px-2 py-1 border border-gray-200 dark:border-[var(--border)] rounded bg-white dark:bg-[var(--surface-3)] text-gray-800 dark:text-gray-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--color-700)]"
+                          >
+                            {!b.counterpartyResolved && <option value="__custom__">— Pick a counterparty —</option>}
+                            {existingCounterparties.map((cp) => (
+                              <option key={cp} value={cp}>{cp}</option>
+                            ))}
+                            {b.counterpartyResolved && !existingCounterparties.includes(b.counterpartyName) && (
+                              <option value={b.counterpartyName}>{b.counterpartyName} (new)</option>
+                            )}
+                          </select>
+                          {!b.counterpartyResolved && (
+                            <span className="inline-flex items-center gap-1 text-2xs text-amber-700 dark:text-amber-400 flex-shrink-0">
+                              <AlertCircle aria-hidden="true" className="w-3 h-3" strokeWidth={2} />
+                              not in file
+                            </span>
+                          )}
+                        </div>
+                        {/* Obligation rows */}
                         <table className="w-full text-2xs">
                           <thead>
-                            <tr className="text-gray-500 dark:text-gray-400 uppercase tracking-wide text-[9px]">
+                            <tr className="text-gray-500 dark:text-gray-400 uppercase tracking-wide text-[9px] bg-gray-50 dark:bg-[var(--color-1)]">
                               <th className="text-left pl-3 pr-2 py-1.5 font-medium">Direction</th>
                               <th className="text-left px-2 py-1.5 font-medium">Asset</th>
                               <th className="text-right px-2 py-1.5 font-medium">Amount</th>
@@ -1766,25 +2136,102 @@ function ImportModal({ onConfirm, onClose }: ImportModalProps) {
                             </tr>
                           </thead>
                           <tbody>
-                            {b.obligations.map((ob, j) => (
-                              <tr key={j} className="border-t border-gray-100 dark:border-[var(--border)]">
-                                <td className={`pl-3 pr-2 py-1.5 font-semibold ${ob.direction === 'deliver' ? 'text-[var(--negative)]' : 'text-[var(--positive)]'}`}>
-                                  {ob.direction === 'deliver' ? 'Deliver' : 'Receive'}
-                                </td>
-                                <td className="px-2 py-1.5 font-medium text-gray-700 dark:text-gray-200">
-                                  <span className="flex items-center gap-1.5">
-                                    <CryptoIcon symbol={ob.asset} size={14} />
-                                    {ob.asset}
-                                  </span>
-                                </td>
-                                <td className="px-2 py-1.5 text-right tabular-nums text-gray-700 dark:text-gray-200">
-                                  {ob.amountAsset.toLocaleString(undefined, { maximumFractionDigits: 8 })}
-                                </td>
-                                <td className="pr-3 py-1.5 text-right tabular-nums text-gray-500 dark:text-gray-400">
-                                  {ob.amountUsd > 0 ? fmtUsdCompact(ob.amountUsd) : '—'}
-                                </td>
-                              </tr>
-                            ))}
+                            {b.obligations.map((ob, j) => {
+                              const hasIssue = (ob.issues?.length ?? 0) > 0;
+                              const ambiguousDir = ob.issues?.includes('ambiguous_direction');
+                              const missingAmt = ob.issues?.includes('missing_amount');
+                              return (
+                                <React.Fragment key={j}>
+                                  <tr className={`border-t border-gray-100 dark:border-[var(--border)] ${hasIssue ? 'bg-amber-50/40 dark:bg-amber-900/5' : ''}`}>
+                                    {/* Direction toggle */}
+                                    <td className="pl-3 pr-2 py-1.5">
+                                      <div className="flex items-center gap-0.5 rounded-full border border-gray-200 dark:border-[var(--border)] bg-white dark:bg-[var(--surface-3)] p-0.5 w-fit">
+                                        {(['deliver', 'receive'] as const).map((d) => (
+                                          <button
+                                            key={d}
+                                            type="button"
+                                            onClick={() => {
+                                              const newIssues = (ob.issues ?? []).filter(x => x !== 'ambiguous_direction');
+                                              updateObligation(i, j, { direction: d, issues: newIssues.length ? newIssues : undefined });
+                                            }}
+                                            className={`px-2 py-0.5 rounded-full text-[9px] font-semibold transition-colors ${
+                                              ob.direction === d
+                                                ? d === 'deliver'
+                                                  ? 'bg-red-50 dark:bg-red-900/20 text-red-500 dark:text-red-400'
+                                                  : 'bg-[var(--positive)]/10 text-[var(--positive)]'
+                                                : 'text-gray-400 dark:text-gray-500 hover:text-gray-600'
+                                            }`}
+                                          >
+                                            {d === 'deliver' ? 'Deliver' : 'Receive'}
+                                          </button>
+                                        ))}
+                                      </div>
+                                    </td>
+                                    {/* Asset */}
+                                    <td className="px-2 py-1.5">
+                                      <AssetSelect
+                                        value={ob.asset}
+                                        onChange={(newAsset) => {
+                                          const price = ASSET_USD[newAsset] ?? 1;
+                                          updateObligation(i, j, { asset: newAsset, amountUsd: ob.amountAsset > 0 ? ob.amountAsset * price : ob.amountUsd });
+                                        }}
+                                      />
+                                    </td>
+                                    {/* Amount */}
+                                    <td className="px-2 py-1.5 text-right">
+                                      <input
+                                        type="text"
+                                        inputMode="decimal"
+                                        placeholder="0"
+                                        value={ob.amountAsset > 0 ? ob.amountAsset.toLocaleString(undefined, { maximumFractionDigits: 8 }) : ''}
+                                        onChange={(e) => {
+                                          const cleaned = stripCommas(formatNumInput(e.target.value, 8));
+                                          const v = parseFloat(cleaned) || 0;
+                                          const price = ASSET_USD[ob.asset] ?? 1;
+                                          const newIssues = (ob.issues ?? []).filter(x => x !== 'missing_amount');
+                                          updateObligation(i, j, {
+                                            amountAsset: v,
+                                            amountUsd: v > 0 ? v * price : 0,
+                                            issues: (v > 0 && newIssues.length === 0) ? undefined : (v > 0 ? newIssues : ob.issues),
+                                          });
+                                        }}
+                                        className={`w-24 text-right text-[10px] font-medium bg-transparent border rounded px-1.5 py-0.5 text-gray-800 dark:text-gray-100 tabular-nums focus:outline-none ${
+                                          missingAmt
+                                            ? 'border-amber-400 dark:border-amber-700 focus:border-amber-500'
+                                            : 'border-transparent hover:border-gray-200 dark:hover:border-[var(--border)] focus:border-[var(--color-700)]'
+                                        }`}
+                                        aria-label="Amount"
+                                      />
+                                    </td>
+                                    {/* USD */}
+                                    <td className="pr-3 py-1.5 text-right tabular-nums text-gray-500 dark:text-gray-400 text-[10px]">
+                                      {ob.amountUsd > 0 ? fmtUsdCompact(ob.amountUsd) : '—'}
+                                    </td>
+                                  </tr>
+                                  {(hasIssue || ob.hint) && (
+                                    <tr className={`border-t border-gray-50 dark:border-[var(--border)] ${hasIssue ? 'bg-amber-50/40 dark:bg-amber-900/5' : ''}`}>
+                                      <td colSpan={4} className="pl-7 pr-3 pb-1.5 text-[10px]">
+                                        {ambiguousDir && (
+                                          <span className="inline-flex items-center gap-1 text-amber-700 dark:text-amber-400 mr-3">
+                                            <AlertCircle aria-hidden="true" className="w-2.5 h-2.5" strokeWidth={2.5} />
+                                            Direction unclear — pick Deliver or Receive
+                                          </span>
+                                        )}
+                                        {missingAmt && (
+                                          <span className="inline-flex items-center gap-1 text-amber-700 dark:text-amber-400 mr-3">
+                                            <AlertCircle aria-hidden="true" className="w-2.5 h-2.5" strokeWidth={2.5} />
+                                            Amount missing — enter a value
+                                          </span>
+                                        )}
+                                        {!hasIssue && ob.hint && (
+                                          <span className="text-gray-400 dark:text-gray-500 italic">{ob.hint}</span>
+                                        )}
+                                      </td>
+                                    </tr>
+                                  )}
+                                </React.Fragment>
+                              );
+                            })}
                           </tbody>
                         </table>
                       </div>
@@ -1792,6 +2239,12 @@ function ImportModal({ onConfirm, onClose }: ImportModalProps) {
                   </div>
                 );
               })}
+
+              {hasUnresolvedIssues && (
+                <p className="text-2xs text-amber-700 dark:text-amber-400 italic">
+                  Resolve the {issueCounts.total} flagged item{issueCounts.total !== 1 ? 's' : ''} above to continue.
+                </p>
+              )}
             </div>
           )}
 
@@ -2284,7 +2737,7 @@ export default function BatchesView({ batches, onBatchesChange, initialBatchId, 
   const [cpSearch, setCpSearch] = useState('');
   const cpFilterRef = useRef<HTMLDivElement>(null);
   const [listSearch, setListSearch] = useState('');
-  type BatchSortCol = 'id' | 'counterparty' | 'status' | 'cutoff' | 'deliver' | 'receive' | 'net';
+  type BatchSortCol = 'id' | 'counterparty' | 'status' | 'cutoff' | 'obligations' | 'deliver' | 'receive' | 'net';
   const [batchSortCol, setBatchSortCol] = useState<BatchSortCol>('cutoff');
   const [batchSortDir, setBatchSortDir] = useState<'asc' | 'desc'>('desc');
   const toggleBatchSort = (col: BatchSortCol) => {
@@ -2421,6 +2874,7 @@ export default function BatchesView({ batches, onBatchesChange, initialBatchId, 
       case 'counterparty': cmp = a.counterpartyName.localeCompare(b.counterpartyName); break;
       case 'status':       cmp = a.status.localeCompare(b.status); break;
       case 'cutoff':       cmp = new Date(a.cutoffTime).getTime() - new Date(b.cutoffTime).getTime(); break;
+      case 'obligations':  cmp = (a.deliverObligations.length + a.receiveObligations.length) - (b.deliverObligations.length + b.receiveObligations.length); break;
       case 'deliver':      cmp = aD - bD; break;
       case 'receive':      cmp = aR - bR; break;
       case 'net':          cmp = (aR - aD) - (bR - bD); break;
@@ -2519,6 +2973,13 @@ export default function BatchesView({ batches, onBatchesChange, initialBatchId, 
 
   const handleBatchUpdate = (updated: Batch) => {
     onBatchesChange(batches.map((b) => (b.id === updated.id ? updated : b)));
+  };
+
+  const handleBatchDelete = (id: string) => {
+    onBatchesChange(batches.filter((b) => b.id !== id));
+    setSelectedId('');
+    setFocusedIndex(-1);
+    setBatchesMode('dashboard');
   };
 
   const goToDashboard = () => {
@@ -2997,6 +3458,7 @@ export default function BatchesView({ batches, onBatchesChange, initialBatchId, 
                       {sortTh('counterparty', 'Counterparty','text-left px-2 py-2')}
                       {sortTh('status',       'Status',      'text-left px-2 py-2')}
                       {sortTh('cutoff',       'Cutoff',      'text-left px-2 py-2')}
+                      {sortTh('obligations',  '# Obligations','text-right px-2 py-2')}
                       {sortTh('deliver',      'To deliver',  'text-right px-2 py-2')}
                       {sortTh('receive',      'To receive',  'text-right px-2 py-2')}
                       {sortTh('net',          'Net position','text-right pr-4 py-2')}
@@ -3025,6 +3487,7 @@ export default function BatchesView({ batches, onBatchesChange, initialBatchId, 
                             <StatusBadge status={batch.origin === 'requested' && batch.status === 'Draft' ? 'Pending' : batch.status} pct={getBatchClearedPct(batch)} />
                           </td>
                           <td className="px-2 py-2.5 text-gray-500 dark:text-gray-400 tabular-nums">{fmtCutoff(batch.cutoffTime)}</td>
+                          <td className="text-right px-2 py-2.5 tabular-nums text-gray-600 dark:text-gray-300">{batch.deliverObligations.length + batch.receiveObligations.length}</td>
                           <td className="text-right px-2 py-2.5 tabular-nums text-[var(--negative)]">{bDeliver > 0 ? fmtUsdFull(bDeliver) : '—'}</td>
                           <td className="text-right px-2 py-2.5 tabular-nums text-[var(--positive)]">{bReceive > 0 ? fmtUsdFull(bReceive) : '—'}</td>
                           <td className={`text-right pr-4 py-2.5 tabular-nums font-semibold ${bNet >= 0 ? 'text-[var(--positive)]' : 'text-[var(--negative)]'}`}>
@@ -3041,7 +3504,7 @@ export default function BatchesView({ batches, onBatchesChange, initialBatchId, 
         </div>
 
         {showImport && (
-          <ImportModal onConfirm={handleImportConfirm} onClose={() => setShowImport(false)} />
+          <ImportModal onConfirm={handleImportConfirm} onClose={() => setShowImport(false)} existingCounterparties={allCounterparties} />
         )}
       </>
     );
@@ -3459,7 +3922,7 @@ export default function BatchesView({ batches, onBatchesChange, initialBatchId, 
           {showOverview ? (
             <PostedTotalOverview batches={batches} />
           ) : selectedBatch ? (
-            <BatchDetail batch={selectedBatch} onUpdate={handleBatchUpdate} />
+            <BatchDetail batch={selectedBatch} onUpdate={handleBatchUpdate} onDelete={handleBatchDelete} />
           ) : (
             <BatchesLanding
               filteredBatches={filteredBatches}
@@ -3471,7 +3934,7 @@ export default function BatchesView({ batches, onBatchesChange, initialBatchId, 
 
       {/* ── Modals ────────────────────────────────────────────────── */}
       {showImport && (
-        <ImportModal onConfirm={handleImportConfirm} onClose={() => setShowImport(false)} />
+        <ImportModal onConfirm={handleImportConfirm} onClose={() => setShowImport(false)} existingCounterparties={allCounterparties} />
       )}
     </div>
   );
