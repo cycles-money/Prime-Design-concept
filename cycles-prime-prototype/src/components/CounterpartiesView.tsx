@@ -262,13 +262,12 @@ const STATUS_STYLES: Record<BatchStatus, string> = {
     'bg-orange-50 dark:bg-orange-900/20 text-orange-600 dark:text-orange-400 border border-orange-200 dark:border-orange-800',
 };
 
-function StatusBadge({ status, pct }: { status: BatchStatus; pct?: number }) {
-  const label = status === 'Cleared' && pct !== undefined ? `${pct}% Cleared` : status;
+function StatusBadge({ status }: { status: BatchStatus; pct?: number }) {
   return (
     <span
       className={`inline-block rounded px-1.5 py-0.5 text-2xs font-medium leading-tight tabular-nums whitespace-nowrap ${STATUS_STYLES[status]}`}
     >
-      {label}
+      {status}
     </span>
   );
 }
@@ -408,27 +407,9 @@ function DetailPanel({
           />
         </div>
 
-        {/* ── 2b. Status breakdown ───────────────────────────────────── */}
-        {cpBatches.length > 0 && (
-          <div className="grid grid-cols-3 gap-3 lg:grid-cols-6">
-            <KpiCard label="Draft" value={String(statusCounts['Draft'] ?? 0)} accent="text-gray-500 dark:text-gray-400" />
-            <KpiCard label="Pending" value={String(statusCounts['Pending'] ?? 0)} accent="text-amber-600 dark:text-amber-400" />
-            <KpiCard label="Approved" value={String(statusCounts['Approved'] ?? 0)} accent="text-[var(--color-700)] dark:text-[var(--color-300)]" />
-            <KpiCard label="Cleared" value={String(statusCounts['Cleared'] ?? 0)} accent="text-[var(--positive)]" />
-            <div className="rounded-xl bg-white dark:bg-[var(--color-2)] shadow-md dark:shadow-[0_8px_24px_rgba(0,0,0,0.5)] px-4 py-3">
-              <div className="flex items-center gap-1.5">
-                <p className="text-2xs uppercase tracking-wide font-semibold text-[var(--negative)]">To deliver</p>
-              </div>
-              <p className="text-base font-bold tabular-nums mt-1.5 text-gray-900 dark:text-gray-100">{totalDeliverUsd > 0 ? fmtUsdCompact(totalDeliverUsd) : '—'}</p>
-            </div>
-            <div className="rounded-xl bg-white dark:bg-[var(--color-2)] shadow-md dark:shadow-[0_8px_24px_rgba(0,0,0,0.5)] px-4 py-3">
-              <div className="flex items-center gap-1.5">
-                <p className="text-2xs uppercase tracking-wide font-semibold text-[var(--positive)]">To receive</p>
-              </div>
-              <p className="text-base font-bold tabular-nums mt-1.5 text-gray-900 dark:text-gray-100">{totalReceiveUsd > 0 ? fmtUsdCompact(totalReceiveUsd) : '—'}</p>
-            </div>
-          </div>
-        )}
+        {/* Status breakdown removed — primary purpose of this page is to get
+            the user into a batch. KPI strip + Batches table cover the
+            essentials without duplicating per-status counts. */}
 
         {/* ── 3. Asset breakdown ─────────────────────────────────────── */}
         {assetRows.length > 0 && (

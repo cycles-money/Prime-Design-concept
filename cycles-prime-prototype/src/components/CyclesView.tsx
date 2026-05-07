@@ -969,7 +969,7 @@ function PostClearingTable({ cycle, batches }: { cycle: Cycle; batches: import('
                           </p>
                         </div>
                         <span className="inline-block rounded px-1.5 py-0.5 text-2xs font-medium leading-tight tabular-nums whitespace-nowrap bg-green-50 dark:bg-green-900/20 text-[var(--positive)] border border-green-200 dark:border-green-800 flex-shrink-0">
-                          {batchPct}% Cleared
+                          Cleared
                         </span>
                         {isExpanded
                           ? <ChevronDown size={14} className="text-gray-400 dark:text-gray-500 flex-shrink-0" aria-hidden />

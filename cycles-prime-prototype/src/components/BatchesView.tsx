@@ -70,16 +70,15 @@ function getBatchClearedPct(batch: Batch): number {
   return t > 0 ? Math.round((c / t) * 100) : 0;
 }
 
-function StatusBadge({ status, pct }: { status: BatchStatus; pct?: number }) {
-  const label =
-    status === 'Cleared' && pct !== undefined
-      ? `${pct}% Cleared`
-      : status;
+// `pct` accepted for backward compatibility but no longer rendered inside
+// the badge — status labels are now words only (per design refresh).
+// Cleared % should be shown as a separate column / value with explicit label.
+function StatusBadge({ status }: { status: BatchStatus; pct?: number }) {
   return (
     <span
       className={`inline-block rounded px-1.5 py-0.5 text-2xs font-medium leading-tight tabular-nums whitespace-nowrap ${STATUS_STYLES[status]}`}
     >
-      {label}
+      {status}
     </span>
   );
 }
@@ -897,7 +896,7 @@ function CombinedObligationTable({
                             <button
                               onClick={confirmNewRow}
                               disabled={!(parseFloat(newRow.amountAsset) > 0)}
-                              className="text-[10px] font-semibold bg-[#CDF698] text-gray-900 hover:bg-[var(--color-200)] px-2 py-0.5 rounded disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                              className="text-[10px] font-semibold bg-[#CDF698] text-gray-900 hover:bg-[var(--color-200)] px-2.5 py-0.5 rounded-full disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
                             >
                               Add
                             </button>
@@ -922,7 +921,7 @@ function CombinedObligationTable({
                           colSpan={totalCols}
                           className="pl-4 pr-3 py-2 text-[10px] font-semibold text-[var(--color-700)] dark:text-[var(--color-300)] hover:underline border-t border-dashed border-gray-100 dark:border-[var(--border)]"
                         >
-                          + Add {isDeliver ? 'deliver' : 'receive'} obligation
+                          + Add new
                         </td>
                       </tr>
                     )}
@@ -1294,7 +1293,7 @@ function BatchDetail({ batch, onUpdate, onDelete }: BatchDetailProps) {
                   <p className={`text-[10px] uppercase tracking-wide font-semibold ${color}`}>{label}</p>
                 </div>
                 <span className="text-[10px] text-gray-400 dark:text-gray-500 tabular-nums">
-                  {count} {count === 1 ? 'line' : 'lines'}
+                  {count} obligation{count === 1 ? '' : 's'}
                 </span>
               </div>
               {batch.status === 'Cleared' ? (
@@ -1319,16 +1318,8 @@ function BatchDetail({ batch, onUpdate, onDelete }: BatchDetailProps) {
           ))}
         </div>
 
-        <CombinedObligationTable
-          deliverObligations={batch.deliverObligations}
-          receiveObligations={batch.receiveObligations}
-          onUpdateDeliver={updateDeliver}
-          onUpdateReceive={updateReceive}
-          onMoveObligation={moveObligation}
-          batchStatus={batch.status}
-          counterpartyName={batch.counterpartyName}
-          onSettleWithLynq={handleSettleWithLynq}
-          onAddObligation={(ob, dir) => {
+        {(() => {
+          const onAdd = (ob: Obligation, dir: 'deliver' | 'receive') => {
             const updated: Batch = {
               ...batch,
               status: 'Draft',
@@ -1337,8 +1328,8 @@ function BatchDetail({ batch, onUpdate, onDelete }: BatchDetailProps) {
               totalUsd: batch.totalUsd + ob.amountUsd,
             };
             onUpdate(updated);
-          }}
-          onRemoveObligation={(dir, index) => {
+          };
+          const onRemove = (dir: 'deliver' | 'receive', index: number) => {
             const deliver = dir === 'deliver'
               ? batch.deliverObligations.filter((_, i) => i !== index)
               : batch.deliverObligations;
@@ -1347,8 +1338,56 @@ function BatchDetail({ batch, onUpdate, onDelete }: BatchDetailProps) {
               : batch.receiveObligations;
             const newTotal = [...deliver, ...receive].reduce((s, o) => s + o.amountUsd, 0);
             onUpdate({ ...batch, deliverObligations: deliver, receiveObligations: receive, totalUsd: newTotal });
-          }}
-        />
+          };
+          // Variant A (?layout=split): two separate tables, Deliver above Receive.
+          // Variant B (default): single combined table with a Direction column.
+          // Internal review only — do not surface as a user-facing toggle.
+          const useSplit = typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('layout') === 'split';
+          if (useSplit) {
+            return (
+              <div className="space-y-3">
+                <CombinedObligationTable
+                  deliverObligations={batch.deliverObligations}
+                  receiveObligations={[]}
+                  onUpdateDeliver={updateDeliver}
+                  onUpdateReceive={updateReceive}
+                  onMoveObligation={moveObligation}
+                  batchStatus={batch.status}
+                  counterpartyName={batch.counterpartyName}
+                  onSettleWithLynq={handleSettleWithLynq}
+                  onAddObligation={(ob) => onAdd(ob, 'deliver')}
+                  onRemoveObligation={onRemove}
+                />
+                <CombinedObligationTable
+                  deliverObligations={[]}
+                  receiveObligations={batch.receiveObligations}
+                  onUpdateDeliver={updateDeliver}
+                  onUpdateReceive={updateReceive}
+                  onMoveObligation={moveObligation}
+                  batchStatus={batch.status}
+                  counterpartyName={batch.counterpartyName}
+                  onSettleWithLynq={handleSettleWithLynq}
+                  onAddObligation={(ob) => onAdd(ob, 'receive')}
+                  onRemoveObligation={onRemove}
+                />
+              </div>
+            );
+          }
+          return (
+            <CombinedObligationTable
+              deliverObligations={batch.deliverObligations}
+              receiveObligations={batch.receiveObligations}
+              onUpdateDeliver={updateDeliver}
+              onUpdateReceive={updateReceive}
+              onMoveObligation={moveObligation}
+              batchStatus={batch.status}
+              counterpartyName={batch.counterpartyName}
+              onSettleWithLynq={handleSettleWithLynq}
+              onAddObligation={onAdd}
+              onRemoveObligation={onRemove}
+            />
+          );
+        })()}
 
         {/* Activity history */}
         {batch.activity && batch.activity.length > 0 && (
@@ -1653,15 +1692,14 @@ interface ImportModalProps {
   existingCounterparties: string[];
 }
 
-type ImportStep = 'upload' | 'validate' | 'review' | 'submit' | 'complete';
+type ImportStep = 'upload' | 'review' | 'complete';
 type SubmitMode = 'draft' | 'direct';
 
-const STEP_ORDER: ImportStep[] = ['upload', 'validate', 'review', 'submit', 'complete'];
+// Merged "validate" into "review" — one screen for issue summary + inline edits + final action.
+const STEP_ORDER: ImportStep[] = ['upload', 'review', 'complete'];
 const STEP_LABELS: Record<ImportStep, string> = {
   upload: 'Upload',
-  validate: 'Validate',
-  review: 'Review',
-  submit: 'Submit',
+  review: 'Review & validate',
   complete: 'Done',
 };
 
@@ -1729,20 +1767,14 @@ function ImportModal({ onConfirm, onClose, existingCounterparties }: ImportModal
 
   const goNext = () => {
     if (step === 'upload') {
-      if (runValidation()) setStep('validate');
-    } else if (step === 'validate') {
-      setStep('review');
+      if (runValidation()) setStep('review');
     } else if (step === 'review') {
-      setStep('submit');
-    } else if (step === 'submit') {
       finalize();
     }
   };
 
   const goBack = () => {
-    if (step === 'validate') setStep('upload');
-    else if (step === 'review') setStep('validate');
-    else if (step === 'submit') setStep('review');
+    if (step === 'review') setStep('upload');
   };
 
   const finalize = () => {
@@ -1809,16 +1841,14 @@ function ImportModal({ onConfirm, onClose, existingCounterparties }: ImportModal
   const currentStepIdx = STEP_ORDER.indexOf(step);
   const canGoNext = (() => {
     if (step === 'upload') return raw.trim().length > 0;
-    if (step === 'validate') return parseResult !== null && parseResult.batches.length > 0;
     if (step === 'review') return !hasUnresolvedIssues;
-    if (step === 'submit') return !hasUnresolvedIssues;
     return false;
   })();
 
   return (
     <div className="modal-overlay" onClick={(e) => e.target === e.currentTarget && step !== 'complete' && onClose()}>
       <div
-        className="bg-white dark:bg-[var(--color-1)] rounded-lg shadow-xl w-full max-w-2xl mx-4 overflow-hidden border border-gray-200 dark:border-[var(--border)]"
+        className="bg-white dark:bg-[var(--color-1)] rounded-lg shadow-xl w-[85vw] max-w-[1400px] mx-4 overflow-hidden border border-gray-200 dark:border-[var(--border)]"
         role="dialog"
         aria-modal="true"
         aria-labelledby="import-modal-title"
@@ -1875,7 +1905,7 @@ function ImportModal({ onConfirm, onClose, existingCounterparties }: ImportModal
         </div>
 
         {/* Body */}
-        <div className="px-5 py-4 min-h-[280px] max-h-[60vh] overflow-y-auto">
+        <div className="px-5 py-4 min-h-[420px] max-h-[75vh] overflow-y-auto">
           {step === 'upload' && (
             <div className="space-y-3">
               {/* File upload area — drag & drop + click to browse */}
@@ -1947,9 +1977,9 @@ function ImportModal({ onConfirm, onClose, existingCounterparties }: ImportModal
             </div>
           )}
 
-          {step === 'validate' && parseResult && (
+          {step === 'review' && parseResult && (
             <div className="space-y-3">
-              {/* Summary */}
+              {/* Inline summary (formerly the Validate step) */}
               <div className="grid grid-cols-3 gap-3">
                 <div className="px-3 py-2.5 bg-gray-50 dark:bg-[var(--surface-3)] rounded-lg">
                   <p className="text-2xs text-gray-500 dark:text-gray-400 uppercase tracking-wide font-medium">Batches</p>
@@ -1967,9 +1997,8 @@ function ImportModal({ onConfirm, onClose, existingCounterparties }: ImportModal
                 </div>
               </div>
 
-              {/* Per-issue breakdown — actionable, fixed in Review */}
               {issueCounts.total > 0 && (
-                <div className="px-3 py-2.5 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg space-y-2">
+                <div className="px-3 py-2.5 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg">
                   <div className="flex items-start gap-2">
                     <AlertCircle aria-hidden="true" className="w-4 h-4 text-amber-600 dark:text-amber-400 flex-shrink-0 mt-0.5" strokeWidth={2} />
                     <div className="flex-1">
@@ -1978,19 +2007,13 @@ function ImportModal({ onConfirm, onClose, existingCounterparties }: ImportModal
                       </p>
                       <ul className="space-y-1 text-2xs text-amber-700 dark:text-amber-400">
                         {issueCounts.unknownCp > 0 && (
-                          <li>
-                            <span className="font-semibold">{issueCounts.unknownCp}</span> batch{issueCounts.unknownCp !== 1 ? 'es' : ''} with no counterparty in the file — pick one in the next step.
-                          </li>
+                          <li><span className="font-semibold">{issueCounts.unknownCp}</span> batch{issueCounts.unknownCp !== 1 ? 'es' : ''} with no counterparty — pick one below.</li>
                         )}
                         {issueCounts.ambiguousDir > 0 && (
-                          <li>
-                            <span className="font-semibold">{issueCounts.ambiguousDir}</span> obligation{issueCounts.ambiguousDir !== 1 ? 's' : ''} where direction couldn't be inferred — confirm Deliver/Receive.
-                          </li>
+                          <li><span className="font-semibold">{issueCounts.ambiguousDir}</span> obligation{issueCounts.ambiguousDir !== 1 ? 's' : ''} where direction couldn't be inferred — confirm Deliver/Receive.</li>
                         )}
                         {issueCounts.missingAmount > 0 && (
-                          <li>
-                            <span className="font-semibold">{issueCounts.missingAmount}</span> obligation{issueCounts.missingAmount !== 1 ? 's' : ''} with missing or zero amount — enter a value.
-                          </li>
+                          <li><span className="font-semibold">{issueCounts.missingAmount}</span> obligation{issueCounts.missingAmount !== 1 ? 's' : ''} with missing or zero amount — enter a value.</li>
                         )}
                       </ul>
                     </div>
@@ -2008,9 +2031,7 @@ function ImportModal({ onConfirm, onClose, existingCounterparties }: ImportModal
                   </div>
                   <ul className="space-y-0.5 ml-6">
                     {parseResult.warnings.map((w, i) => (
-                      <li key={i} className="text-2xs text-gray-500 dark:text-gray-400">
-                        {w}
-                      </li>
+                      <li key={i} className="text-2xs text-gray-500 dark:text-gray-400">{w}</li>
                     ))}
                   </ul>
                 </div>
@@ -2019,30 +2040,14 @@ function ImportModal({ onConfirm, onClose, existingCounterparties }: ImportModal
               {issueCounts.total === 0 && parseResult.warnings.length === 0 && (
                 <div className="flex items-center gap-2 px-3 py-2.5 bg-[var(--positive)]/10 border border-[var(--positive)]/30 rounded-lg">
                   <CheckCircle aria-hidden="true" className="w-4 h-4 text-[var(--positive)] flex-shrink-0" strokeWidth={2} />
-                  <p className="text-xs text-gray-700 dark:text-gray-200 font-medium">All rows parsed cleanly.</p>
+                  <p className="text-xs text-gray-700 dark:text-gray-200 font-medium">All rows parsed cleanly. Pick a submission path below to import.</p>
                 </div>
               )}
 
-              <p className="text-2xs text-gray-500 dark:text-gray-400">
-                {issueCounts.total > 0
-                  ? 'Continue to Review to resolve each flagged row inline.'
-                  : 'Continue to Review the parsed obligations and confirm before submitting.'}
-              </p>
-            </div>
-          )}
-
-          {step === 'review' && parseResult && (
-            <div className="space-y-3">
-              <div className="flex items-center justify-between">
+              <div className="flex items-center justify-between pt-1">
                 <p className="text-2xs text-gray-500 dark:text-gray-400">
                   {n} batch{n !== 1 ? 'es' : ''} · {totalObl} obligation{totalObl !== 1 ? 's' : ''} · click a batch to expand and edit
                 </p>
-                {hasUnresolvedIssues && (
-                  <span className="inline-flex items-center gap-1 text-2xs font-semibold text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-full px-2 py-0.5">
-                    <AlertCircle aria-hidden="true" className="w-3 h-3" strokeWidth={2} />
-                    {issueCounts.total} unresolved
-                  </span>
-                )}
               </div>
 
               {parseResult.batches.map((b, i) => {
@@ -2248,61 +2253,6 @@ function ImportModal({ onConfirm, onClose, existingCounterparties }: ImportModal
             </div>
           )}
 
-          {step === 'submit' && parseResult && (
-            <div className="space-y-3">
-              <p className="text-xs text-gray-700 dark:text-gray-200 font-semibold">
-                How should these batches be created?
-              </p>
-              {([
-                {
-                  mode: 'draft' as const,
-                  title: 'Save as drafts',
-                  desc: 'Batches will be created with status Draft. You can review and edit before sending to counterparties.',
-                  recommended: true,
-                },
-                {
-                  mode: 'direct' as const,
-                  title: 'Send to counterparties immediately',
-                  desc: 'Batches will be created with status Pending and sent to counterparties for approval. No draft step.',
-                  recommended: false,
-                },
-              ]).map(({ mode, title, desc, recommended }) => (
-                <label
-                  key={mode}
-                  className={`flex items-start gap-3 px-3 py-3 rounded-lg border cursor-pointer transition-colors ${
-                    submitMode === mode
-                      ? 'border-[var(--color-700)] dark:border-[var(--color-300)] bg-[var(--color-50)] dark:bg-[var(--color-950)]/20'
-                      : 'border-gray-200 dark:border-[var(--border)] hover:bg-gray-50 dark:hover:bg-[var(--surface-3)]'
-                  }`}
-                >
-                  <input
-                    type="radio"
-                    name="submitMode"
-                    value={mode}
-                    checked={submitMode === mode}
-                    onChange={() => setSubmitMode(mode)}
-                    className="mt-0.5"
-                  />
-                  <div className="flex-1">
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs font-semibold text-gray-800 dark:text-gray-200">{title}</span>
-                      {recommended && (
-                        <span className="text-[9px] font-semibold text-[var(--color-700)] dark:text-[var(--color-300)] bg-[var(--color-50)] dark:bg-[var(--color-950)]/30 px-1.5 py-0.5 rounded uppercase tracking-wide">
-                          Recommended
-                        </span>
-                      )}
-                    </div>
-                    <p className="text-2xs text-gray-500 dark:text-gray-400 mt-1">{desc}</p>
-                  </div>
-                </label>
-              ))}
-
-              <div className="px-3 py-2 bg-gray-50 dark:bg-[var(--surface-3)] rounded-lg text-2xs text-gray-600 dark:text-gray-300">
-                You're about to import <span className="font-semibold">{n} batch{n !== 1 ? 'es' : ''}</span> with <span className="font-semibold">{totalObl} obligation{totalObl !== 1 ? 's' : ''}</span> as <span className="font-semibold">{submitMode === 'direct' ? 'Pending' : 'Draft'}</span>.
-              </div>
-            </div>
-          )}
-
           {step === 'complete' && (
             <div className="flex flex-col items-center text-center py-6 space-y-3">
               <div className="w-12 h-12 rounded-full bg-[var(--positive)]/15 flex items-center justify-center">
@@ -2346,14 +2296,28 @@ function ImportModal({ onConfirm, onClose, existingCounterparties }: ImportModal
               Cancel
             </button>
           )}
-          {step === 'submit' ? (
-            <button
-              onClick={goNext}
-              className="flex items-center gap-1.5 px-4 py-1.5 text-xs font-medium rounded-full transition-colors text-gray-900 bg-[#CDF698] hover:bg-[var(--color-200)]"
-            >
-              <CheckCircle aria-hidden="true" className="w-3 h-3" strokeWidth={2.5} />
-              Import {n} batch{n !== 1 ? 'es' : ''}
-            </button>
+          {step === 'review' ? (
+            <>
+              <button
+                onClick={() => { if (canGoNext) { setSubmitMode('draft'); finalize(); } }}
+                disabled={!canGoNext}
+                className={`flex items-center gap-1.5 px-4 py-1.5 text-xs font-medium rounded-full transition-colors border ${
+                  canGoNext
+                    ? 'text-gray-700 dark:text-gray-200 bg-white dark:bg-[var(--surface-3)] border-gray-300 dark:border-[var(--border)] hover:bg-gray-100 dark:hover:bg-[var(--surface-2)]'
+                    : 'text-gray-400 dark:text-gray-600 bg-white dark:bg-[var(--surface-3)] border-gray-200 dark:border-[var(--border)] opacity-50 cursor-not-allowed'
+                }`}
+              >
+                Import as draft{n !== 1 ? 's' : ''}
+              </button>
+              <button
+                onClick={() => { if (canGoNext) { setSubmitMode('direct'); finalize(); } }}
+                disabled={!canGoNext}
+                className={`flex items-center gap-1.5 px-4 py-1.5 text-xs font-medium rounded-full transition-colors text-gray-900 bg-[#CDF698] ${canGoNext ? 'hover:bg-[var(--color-200)]' : 'opacity-30 cursor-not-allowed'}`}
+              >
+                <CheckCircle aria-hidden="true" className="w-3 h-3" strokeWidth={2.5} />
+                Send to counterparties
+              </button>
+            </>
           ) : step === 'complete' ? (
             <button
               onClick={handleDone}
@@ -2703,6 +2667,40 @@ export default function BatchesView({ batches, onBatchesChange, initialBatchId, 
   const [selectedId, setSelectedId] = useState<string>(initialBatchId ?? '');
   const [focusedIndex, setFocusedIndex] = useState<number>(0);
   const [batchesMode, setBatchesMode] = useState<'dashboard' | 'detail'>(() => initialBatchId ? 'detail' : 'dashboard');
+  // Resizable detail-view sidebar (Task 2)
+  const [sidebarWidth, setSidebarWidth] = useState<number>(() => {
+    const saved = parseFloat(localStorage.getItem('cycles-prime:detail-sidebar-pct') ?? '');
+    return Number.isFinite(saved) && saved >= 22 && saved <= 55 ? saved : 30;
+  });
+  const [isResizing, setIsResizing] = useState(false);
+  const resizeContainerRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!isResizing) return;
+    const onMove = (e: MouseEvent) => {
+      const c = resizeContainerRef.current;
+      if (!c) return;
+      const rect = c.getBoundingClientRect();
+      const pct = ((e.clientX - rect.left) / rect.width) * 100;
+      const clamped = Math.max(22, Math.min(55, pct));
+      setSidebarWidth(clamped);
+    };
+    const onUp = () => {
+      setIsResizing(false);
+      document.body.style.userSelect = '';
+      document.body.style.cursor = '';
+    };
+    document.body.style.userSelect = 'none';
+    document.body.style.cursor = 'col-resize';
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+    return () => {
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+    };
+  }, [isResizing]);
+  useEffect(() => {
+    try { localStorage.setItem('cycles-prime:detail-sidebar-pct', String(sidebarWidth)); } catch {}
+  }, [sidebarWidth]);
   const [showImport, setShowImport] = useState(false);
   const [showAddMenu, setShowAddMenu]         = useState(false);
   const [showNewBatchForm, setShowNewBatchForm] = useState(false);
@@ -3475,22 +3473,22 @@ export default function BatchesView({ batches, onBatchesChange, initialBatchId, 
                           onClick={() => openBatchDetail(batch.id)}
                           className="cursor-pointer hover:bg-gray-50 dark:hover:bg-[var(--surface-3)] border-b border-gray-100 dark:border-[var(--border)] last:border-b-0 transition-colors group"
                         >
-                          <td className="pl-4 pr-2 py-2.5 text-[10px] text-gray-500 dark:text-gray-400">{batch.id}</td>
-                          <td className="px-2 py-2.5">
+                          <td className="pl-4 pr-2 py-1.5 text-[10px] text-gray-500 dark:text-gray-400">{batch.id}</td>
+                          <td className="px-2 py-1.5">
                             <div className="flex items-center gap-2">
                               <CounterpartyAvatar name={batch.counterpartyName} size={18} />
                               <span className="font-medium text-gray-800 dark:text-gray-100 group-hover:text-gray-900 dark:group-hover:text-white">{batch.counterpartyName}</span>
                               <ChevronRight aria-hidden="true" className="w-3 h-3 text-gray-300 dark:text-gray-600 opacity-0 group-hover:opacity-100 transition-opacity" strokeWidth={2} />
                             </div>
                           </td>
-                          <td className="px-2 py-2.5">
-                            <StatusBadge status={batch.origin === 'requested' && batch.status === 'Draft' ? 'Pending' : batch.status} pct={getBatchClearedPct(batch)} />
+                          <td className="px-2 py-1.5">
+                            <StatusBadge status={batch.origin === 'requested' && batch.status === 'Draft' ? 'Pending' : batch.status} />
                           </td>
-                          <td className="px-2 py-2.5 text-gray-500 dark:text-gray-400 tabular-nums">{fmtCutoff(batch.cutoffTime)}</td>
-                          <td className="text-right px-2 py-2.5 tabular-nums text-gray-600 dark:text-gray-300">{batch.deliverObligations.length + batch.receiveObligations.length}</td>
-                          <td className="text-right px-2 py-2.5 tabular-nums text-[var(--negative)]">{bDeliver > 0 ? fmtUsdFull(bDeliver) : '—'}</td>
-                          <td className="text-right px-2 py-2.5 tabular-nums text-[var(--positive)]">{bReceive > 0 ? fmtUsdFull(bReceive) : '—'}</td>
-                          <td className={`text-right pr-4 py-2.5 tabular-nums font-semibold ${bNet >= 0 ? 'text-[var(--positive)]' : 'text-[var(--negative)]'}`}>
+                          <td className="px-2 py-1.5 text-gray-500 dark:text-gray-400 tabular-nums">{fmtCutoff(batch.cutoffTime)}</td>
+                          <td className="text-right px-2 py-1.5 tabular-nums text-gray-600 dark:text-gray-300">{batch.deliverObligations.length + batch.receiveObligations.length}</td>
+                          <td className="text-right px-2 py-1.5 tabular-nums text-[var(--negative)]">{bDeliver > 0 ? fmtUsdFull(bDeliver) : '—'}</td>
+                          <td className="text-right px-2 py-1.5 tabular-nums text-[var(--positive)]">{bReceive > 0 ? fmtUsdFull(bReceive) : '—'}</td>
+                          <td className={`text-right pr-4 py-1.5 tabular-nums font-semibold ${bNet >= 0 ? 'text-[var(--positive)]' : 'text-[var(--negative)]'}`}>
                             {bNet >= 0 ? '+' : '−'}{fmtUsdFull(Math.abs(bNet))}
                           </td>
                         </tr>
@@ -3532,80 +3530,14 @@ export default function BatchesView({ batches, onBatchesChange, initialBatchId, 
   return (
     <div className="flex flex-col h-full overflow-hidden">
 
-      {/* ── TOP TOOLBAR: breadcrumb + countdown + CTA ─────────────────── */}
-      <div className="flex-shrink-0 flex items-center gap-2 px-4 py-2.5 bg-white dark:bg-black border-b border-gray-200 dark:border-[var(--border)]">
+      {/* ── BODY: left list + resize handle + right detail ─────────── */}
+      <div ref={resizeContainerRef} className="flex flex-1 overflow-hidden">
 
-        {/* Back + breadcrumb */}
-        {initialCpFilter ? (
-          <>
-            <button
-              onClick={() => window.dispatchEvent(new CustomEvent('navigate-to-counterparty', { detail: initialCpFilter }))}
-              className="flex items-center gap-1 text-2xs font-medium text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 transition-colors flex-shrink-0"
-            >
-              <ChevronRight aria-hidden="true" className="w-3 h-3 rotate-180" strokeWidth={2} />
-              Counterparties
-            </button>
-            <span className="text-gray-300 dark:text-gray-600 text-xs">/</span>
-            <button
-              onClick={() => window.dispatchEvent(new CustomEvent('navigate-to-counterparty', { detail: initialCpFilter }))}
-              className="flex items-center gap-1.5 text-2xs font-medium text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 transition-colors flex-shrink-0 truncate max-w-[200px]"
-            >
-              <CounterpartyAvatar name={initialCpFilter} size={16} />
-              {initialCpFilter}
-            </button>
-            <span className="text-gray-300 dark:text-gray-600 text-xs">/</span>
-            {selectedBatch && (
-              <span className="text-2xs text-gray-400 dark:text-gray-500 truncate">{selectedBatch.id}</span>
-            )}
-          </>
-        ) : (
-          <>
-            <button
-              onClick={goToDashboard}
-              className="flex items-center gap-1 text-2xs font-medium text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 transition-colors flex-shrink-0"
-            >
-              <ChevronRight aria-hidden="true" className="w-3 h-3 rotate-180" strokeWidth={2} />
-              Batches
-            </button>
-            {selectedBatch && (
-              <>
-                <span className="text-gray-300 dark:text-gray-600 text-xs">/</span>
-                <span className="flex items-center gap-1.5 text-2xs font-medium text-gray-700 dark:text-gray-300 truncate max-w-[200px]">
-                  <CounterpartyAvatar name={selectedBatch.counterpartyName} size={16} />
-                  {selectedBatch.counterpartyName}
-                </span>
-                <span className="text-2xs text-gray-400 dark:text-gray-500 truncate">{selectedBatch.id}</span>
-              </>
-            )}
-          </>
-        )}
-
-        <div className="flex-1" />
-
-        {/* Countdown */}
-        {countdown && (
-          <button
-            onClick={() => window.dispatchEvent(new CustomEvent('navigate-tab', { detail: 'cycles' }))}
-            className="flex items-center gap-1 text-2xs text-amber-600 dark:text-amber-400 hover:text-amber-700 dark:hover:text-amber-300 transition-colors flex-shrink-0"
-          >
-            <NumberFlowGroup>
-              <span className="tabular-nums flex items-center" style={{ fontVariantNumeric: 'tabular-nums' }}>
-                <NumberFlow trend={-1} value={parseInt(countdown.hh)} format={{ minimumIntegerDigits: 2 }} />
-                <span className="mx-[1px] opacity-60">:</span>
-                <NumberFlow trend={-1} value={parseInt(countdown.mm)} format={{ minimumIntegerDigits: 2 }} digits={{ 1: { max: 5 } }} />
-              </span>
-            </NumberFlowGroup>
-            <span className="text-gray-400 dark:text-gray-500">· next cycle →</span>
-          </button>
-        )}
-
-      </div>
-
-      {/* ── BODY: left list + right detail ───────────────────────────── */}
-      <div className="flex flex-1 overflow-hidden">
-
-        {/* ── LEFT PANEL: compact searchable batch list ─────────────── */}
-        <div className="w-[30%] min-w-[280px] max-w-[340px] flex-shrink-0 flex flex-col border-r border-gray-100 dark:border-[var(--border)] bg-white dark:bg-black relative z-10">
+        {/* ── LEFT PANEL: searchable batch list (resizable) ────────── */}
+        <div
+          style={{ width: `${sidebarWidth}%` }}
+          className="flex-shrink-0 flex flex-col border-r border-gray-100 dark:border-[var(--border)] bg-white dark:bg-black relative z-10 min-w-[260px]"
+        >
 
           {/* Panel header: label + Add batch */}
           <div className="px-3 pt-3 pb-1 flex items-center justify-between">
@@ -3917,8 +3849,17 @@ export default function BatchesView({ batches, onBatchesChange, initialBatchId, 
           </div>
         </div>
 
+        {/* ── RESIZE HANDLE ────────────────────────────────────────── */}
+        <div
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="Resize batch list panel"
+          onMouseDown={(e) => { e.preventDefault(); setIsResizing(true); }}
+          className="w-1 cursor-col-resize bg-transparent hover:bg-[var(--color-200)] dark:hover:bg-[var(--color-700)] active:bg-[var(--color-300)] dark:active:bg-[var(--color-600)] transition-colors flex-shrink-0"
+        />
+
         {/* ── RIGHT PANEL: landing or batch detail ─────────────────── */}
-        <div className="flex-1 overflow-hidden">
+        <div className="flex-1 overflow-hidden min-w-0">
           {showOverview ? (
             <PostedTotalOverview batches={batches} />
           ) : selectedBatch ? (
