@@ -326,11 +326,21 @@ function AssetSelect({ value, onChange, ariaLabel = 'Asset' }: {
         aria-haspopup="listbox"
         aria-expanded={open}
         aria-label={ariaLabel}
-        className="flex items-center gap-1.5 text-[11px] font-semibold bg-transparent border border-transparent hover:border-gray-200 dark:hover:border-[var(--border)] focus:border-[var(--color-700)] focus:outline-none rounded px-1.5 py-0.5 text-gray-800 dark:text-gray-200 cursor-pointer"
+        className={`flex items-center gap-1.5 text-[11px] font-semibold bg-transparent border focus:border-[var(--color-700)] focus:outline-none rounded px-1.5 py-0.5 cursor-pointer ${
+          value
+            ? 'border-transparent hover:border-gray-200 dark:hover:border-[var(--border)] text-gray-800 dark:text-gray-200'
+            : 'border-dashed border-amber-300 dark:border-amber-700 text-amber-700 dark:text-amber-400 hover:border-amber-400 dark:hover:border-amber-600'
+        }`}
       >
-        <CryptoIcon symbol={value} size={16} />
-        <span>{value}</span>
-        <ChevronDown aria-hidden="true" className={`w-3 h-3 text-gray-400 dark:text-gray-500 flex-shrink-0 transition-transform duration-150 ${open ? 'rotate-180' : ''}`} strokeWidth={2} />
+        {value ? (
+          <>
+            <CryptoIcon symbol={value} size={16} />
+            <span>{value}</span>
+          </>
+        ) : (
+          <span className="italic font-medium">Select asset</span>
+        )}
+        <ChevronDown aria-hidden="true" className={`w-3 h-3 flex-shrink-0 transition-transform duration-150 ${value ? 'text-gray-400 dark:text-gray-500' : 'text-amber-500 dark:text-amber-400'} ${open ? 'rotate-180' : ''}`} strokeWidth={2} />
       </button>
       {open && pos && createPortal(
         <div
@@ -895,7 +905,7 @@ function CombinedObligationTable({
                           <div className="flex items-center gap-1 justify-end">
                             <button
                               onClick={confirmNewRow}
-                              disabled={!(parseFloat(newRow.amountAsset) > 0)}
+                              disabled={!newRow.asset || !(parseFloat(newRow.amountAsset) > 0)}
                               className="text-[10px] font-semibold bg-[#CDF698] text-gray-900 hover:bg-[var(--color-200)] px-2.5 py-0.5 rounded-full disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
                             >
                               Add
@@ -915,7 +925,7 @@ function CombinedObligationTable({
                     {onAddObligation && newRow?.dir !== dir && (
                       <tr
                         className="cursor-pointer hover:bg-gray-50 dark:hover:bg-[var(--surface-3)] transition-colors"
-                        onClick={() => setNewRow({ dir, asset: 'BTC', amountAsset: '', amountUsd: '' })}
+                        onClick={() => setNewRow({ dir, asset: '', amountAsset: '', amountUsd: '' })}
                       >
                         <td
                           colSpan={totalCols}
