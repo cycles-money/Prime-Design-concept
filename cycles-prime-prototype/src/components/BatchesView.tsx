@@ -8,11 +8,10 @@ import React, {
 import { mockBatches, mockCycles } from '../data/mockData';
 import type { Batch, BatchStatus, Obligation, SettlementTarget, ActivityEntry, ActivityEventType } from '../types';
 import LinkSettlementModal from './LinkSettlementModal';
-import { AddCounterpartyModal } from './CounterpartiesView';
 import { fmtUsdCompact, fmtUsdFull, fmtAsset, fmtDate, fmtCutoff, getCountdownParts } from '../utils/formatters';
 import { CryptoIcon } from './CryptoIcon';
 import { CounterpartyAvatar } from './CounterpartyAvatar';
-import { ChevronDown, ChevronRight, Info, Check, Pencil, BanknoteArrowUp, BanknoteArrowDown, Upload, AlertCircle, FileText, X, CheckCircle, Plus, Calendar, TrendingUp, History, RefreshCw, Trash2, Filter } from 'lucide-react';
+import { ChevronDown, ChevronRight, Info, Check, Pencil, ArrowUp, ArrowDown, Upload, AlertCircle, FileText, X, CheckCircle, Plus, Calendar, TrendingUp, History, RefreshCw, Trash2, Filter, Search, Users } from 'lucide-react';
 import NumberFlow, { NumberFlowGroup } from '@number-flow/react';
 
 // ── Lynq eligibility ──────────────────────────────────────────────────────────
@@ -20,17 +19,38 @@ import NumberFlow, { NumberFlowGroup } from '@number-flow/react';
 const LYNQ_USD_ASSETS = new Set(['USDC', 'USDT', 'BUSD', 'DAI', 'USD']);
 const LYNQ_CONTACTS = new Set(['FalconX', 'Cumberland DRW', 'B2C2', 'Wintermute', 'Galaxy Digital', 'Jump Trading']);
 
+// ── Number-input formatting (comma thousands separators) ────────────────────
+
+// Format a numeric string for display while preserving partial input
+// like trailing "." or "1,234." so the user can keep typing.
+function formatNumInput(raw: string, maxFractionDigits = 8): string {
+  if (raw === '' || raw === '.') return raw;
+  const cleaned = raw.replace(/,/g, '');
+  // Reject anything that isn't digits + at most one decimal point
+  if (!/^-?\d*\.?\d*$/.test(cleaned)) return raw;
+  const [intRaw, decRaw] = cleaned.split('.');
+  const intDigits = intRaw.replace(/[^0-9]/g, '');
+  const formattedInt = intDigits === '' ? '' : Number(intDigits).toLocaleString();
+  if (decRaw === undefined) return formattedInt;
+  const decDigits = decRaw.replace(/[^0-9]/g, '').slice(0, maxFractionDigits);
+  return formattedInt + '.' + decDigits;
+}
+
+function stripCommas(s: string): string {
+  return s.replace(/,/g, '');
+}
+
 // ── Status badge ──────────────────────────────────────────────────────────────
 
 const STATUS_STYLES: Record<BatchStatus, string> = {
   Draft:
-    'bg-gray-100 dark:bg-[var(--surface-3)] text-gray-600 dark:text-gray-300',
+    'bg-transparent text-gray-600 dark:text-gray-300 border border-gray-200 dark:border-[var(--border)]',
   Pending:
     'bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-400 border border-amber-200 dark:border-amber-800',
-  Ascertained:
-    'bg-[var(--color-50)] dark:bg-[var(--color-950)]/20 text-gray-800 dark:text-[var(--color-300)] border border-[var(--color-200)] dark:border-[var(--color-900)]',
+  Approved:
+    'bg-[var(--color-50)] dark:bg-[var(--color-950)]/20 text-[var(--color-700)] dark:text-[var(--color-300)] border border-[var(--color-200)] dark:border-[var(--color-900)]',
   Cleared:
-    'bg-[var(--positive)]/10 text-[var(--positive)] border border-[var(--positive)]',
+    'bg-green-50 dark:bg-green-900/20 text-[var(--positive)] border border-green-200 dark:border-green-800',
   Rejected:
     'bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-400 border border-red-200 dark:border-red-800',
   Cancelled:
@@ -41,24 +61,35 @@ const STATUS_STYLES: Record<BatchStatus, string> = {
     'bg-orange-50 dark:bg-orange-900/20 text-orange-600 dark:text-orange-400 border border-orange-200 dark:border-orange-800',
 };
 
-function StatusBadge({ status }: { status: BatchStatus }) {
+function getBatchClearedPct(batch: Batch): number {
+  const obs = [...batch.deliverObligations, ...batch.receiveObligations];
+  const t = obs.reduce((s, o) => s + o.amountUsd, 0);
+  const c = obs.reduce((s, o) => s + o.clearedUsd, 0);
+  return t > 0 ? Math.round((c / t) * 100) : 0;
+}
+
+function StatusBadge({ status, pct }: { status: BatchStatus; pct?: number }) {
+  const label =
+    status === 'Cleared' && pct !== undefined
+      ? `${pct}% Cleared`
+      : status;
   return (
     <span
-      className={`inline-block rounded px-1.5 py-0.5 text-2xs font-medium leading-tight tabular-nums ${STATUS_STYLES[status]}`}
+      className={`inline-block rounded px-1.5 py-0.5 text-2xs font-medium leading-tight tabular-nums whitespace-nowrap ${STATUS_STYLES[status]}`}
     >
-      {status}
+      {label}
     </span>
   );
 }
 
 // ── Status transition rules ─────────────────────────────────────────────────
 
-const STATUS_ORDER: BatchStatus[] = ['Draft', 'Pending', 'Ascertained', 'Cleared', 'Rejected', 'Cancelled', 'Revoked', 'Deleted'];
+const STATUS_ORDER: BatchStatus[] = ['Draft', 'Pending', 'Approved', 'Cleared', 'Rejected', 'Cancelled', 'Revoked', 'Deleted'];
 
 const TRANSITIONS: Record<BatchStatus, BatchStatus[]> = {
   'Draft':      ['Pending'],
-  'Pending':    ['Ascertained', 'Revoked'],
-  'Ascertained': ['Cancelled'],
+  'Pending':    ['Approved', 'Revoked'],
+  'Approved': ['Cancelled'],
   'Cleared':    [],
   'Rejected':   [],
   'Cancelled':  [],
@@ -73,10 +104,11 @@ const isDowngrade = (from: BatchStatus, to: BatchStatus) =>
 
 interface StatusSelectorProps {
   status: BatchStatus;
+  pct?: number;
   onChange: (next: BatchStatus) => void;
 }
 
-function StatusSelector({ status, onChange }: StatusSelectorProps) {
+function StatusSelector({ status, pct, onChange }: StatusSelectorProps) {
   const [open, setOpen] = useState(false);
   const [confirming, setConfirming] = useState<BatchStatus | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -112,7 +144,7 @@ function StatusSelector({ status, onChange }: StatusSelectorProps) {
     }
   };
 
-  if (!mutable) return <StatusBadge status={status} />;
+  if (!mutable) return <StatusBadge status={status} pct={pct} />;
 
   return (
     <div ref={containerRef} className="relative">
@@ -184,100 +216,20 @@ function StatusSelector({ status, onChange }: StatusSelectorProps) {
   );
 }
 
-// ── Editable cell ─────────────────────────────────────────────────────────────
 
-interface EditState {
-  rowIndex: number;
-  field: 'amountAsset' | 'amountUsd';
-  direction: 'deliver' | 'receive';
-}
-
-interface EditableCellProps {
-  value: number;
-  isEditing: boolean;
-  align?: 'right' | 'left';
-  spanClassName?: string;
-  formatFn?: (v: number) => string;
-  onActivate: () => void;
-  onSave: (v: number) => void;
-  onCancel: () => void;
-  onTabNext: () => void;
-  onTabPrev: () => void;
-}
-
-function EditableCell({
-  value,
-  isEditing,
-  align = 'right',
-  spanClassName,
-  formatFn,
-  onActivate,
-  onSave,
-  onCancel,
-  onTabNext,
-  onTabPrev,
-}: EditableCellProps) {
-  const inputRef = useRef<HTMLInputElement>(null);
-
-  useEffect(() => {
-    if (isEditing) inputRef.current?.select();
-  }, [isEditing]);
-
-  if (isEditing) {
-    return (
-      <input
-        ref={inputRef}
-        className="cell-input"
-        aria-label="Edit amount"
-        inputMode="decimal"
-        defaultValue={String(value)}
-        style={{ textAlign: align }}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter') {
-            const parsed = parseFloat(e.currentTarget.value.replace(/,/g, ''));
-            onSave(isNaN(parsed) ? value : parsed);
-          } else if (e.key === 'Escape') {
-            onCancel();
-          } else if (e.key === 'Tab') {
-            e.preventDefault();
-            const parsed = parseFloat(e.currentTarget.value.replace(/,/g, ''));
-            onSave(isNaN(parsed) ? value : parsed);
-            if (e.shiftKey) onTabPrev();
-            else onTabNext();
-          }
-        }}
-        onBlur={(e) => {
-          const parsed = parseFloat(e.target.value.replace(/,/g, ''));
-          onSave(isNaN(parsed) ? value : parsed);
-        }}
-      />
-    );
-  }
-
-  return (
-    <span
-      role="button"
-      tabIndex={0}
-      className={`editable-cell-display cursor-default select-none flex items-center justify-end gap-1 w-full rounded px-1 transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--color-700)] ${spanClassName ?? ''}`}
-      title="Click or Enter to edit"
-      onClick={onActivate}
-      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onActivate(); } }}
-    >
-      <Pencil aria-hidden="true" className="opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0 w-2.5 h-2.5 text-gray-500 dark:text-gray-300" strokeWidth={2.5} />
-      {formatFn ? formatFn(value) : value.toLocaleString(undefined)}
-    </span>
-  );
-}
+const ASSET_USD: Record<string, number> = {
+  BTC: 70_000, ETH: 2_500, SOL: 150, XRP: 1.42,
+  USDT: 1, USDC: 1, USD: 1, DAI: 1, BNB: 580, MATIC: 0.7, ADA: 0.45,
+};
 
 // ── Combined obligation table (Deliver + Receive in one) ─────────────────────
 
 interface CombinedObligationTableProps {
   deliverObligations: Obligation[];
   receiveObligations: Obligation[];
-  onUpdateDeliver: (index: number, field: keyof Obligation, value: number) => void;
-  onUpdateReceive: (index: number, field: keyof Obligation, value: number) => void;
-  editState: EditState | null;
-  onSetEdit: (state: EditState | null) => void;
+  onUpdateDeliver: (index: number, field: keyof Obligation, value: number | string) => void;
+  onUpdateReceive: (index: number, field: keyof Obligation, value: number | string) => void;
+  onMoveObligation: (fromDir: 'deliver' | 'receive', index: number) => void;
   batchStatus: BatchStatus;
   counterpartyName: string;
   onSettleWithLynq: (ob: Obligation) => void;
@@ -290,8 +242,7 @@ function CombinedObligationTable({
   receiveObligations,
   onUpdateDeliver,
   onUpdateReceive,
-  editState,
-  onSetEdit,
+  onMoveObligation,
   batchStatus,
   counterpartyName,
   onSettleWithLynq,
@@ -303,10 +254,23 @@ function CombinedObligationTable({
   type NewRow = { dir: 'deliver' | 'receive'; asset: string; amountAsset: string; amountUsd: string };
   const [newRow, setNewRow] = useState<NewRow | null>(null);
 
-  const ASSET_USD: Record<string, number> = {
-    BTC: 70_000, ETH: 2_500, SOL: 150, XRP: 1.42,
-    USDT: 1, USDC: 1, USD: 1, DAI: 1, BNB: 580, MATIC: 0.7, ADA: 0.45,
-  };
+  const [tableSearch, setTableSearch] = useState('');
+  const [assetFilter, setAssetFilter] = useState<Set<string>>(new Set());
+  const [showAssetMenu, setShowAssetMenu] = useState(false);
+  const [expandedDeliver, setExpandedDeliver] = useState(true);
+  const [expandedReceive, setExpandedReceive] = useState(true);
+  const assetMenuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!showAssetMenu) return;
+    const handler = (e: MouseEvent) => {
+      if (assetMenuRef.current && !assetMenuRef.current.contains(e.target as Node)) {
+        setShowAssetMenu(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [showAssetMenu]);
 
   const confirmNewRow = () => {
     if (!newRow || !onAddObligation) return;
@@ -327,340 +291,527 @@ function CombinedObligationTable({
     ob.remainingUsd > 0 &&
     LYNQ_CONTACTS.has(counterpartyName);
 
-  const allRows: Array<{ dir: 'deliver' | 'receive'; ob: Obligation; idx: number }> = [
-    ...deliverObligations.map((ob, idx) => ({ dir: 'deliver' as const, ob, idx })),
-    ...receiveObligations.map((ob, idx) => ({ dir: 'receive' as const, ob, idx })),
-  ];
-
-  const hasAnyLynqEligible = allRows.some(({ ob }) => isLynqEligible(ob));
-
-  const totalUsd    = allRows.reduce((s, r) => s + r.ob.amountUsd, 0);
-  const clearedUsd  = allRows.reduce((s, r) => s + r.ob.clearedUsd, 0);
-  const totalPct    = totalUsd > 0 ? Math.round((clearedUsd / totalUsd) * 100) : 0;
-
-  const isEditing = (dir: 'deliver' | 'receive', rowIndex: number, field: 'amountAsset' | 'amountUsd') =>
-    editState?.direction === dir && editState.rowIndex === rowIndex && editState.field === field;
-
-  const startEdit = (dir: 'deliver' | 'receive', rowIndex: number, field: 'amountAsset' | 'amountUsd') =>
-    onSetEdit({ rowIndex, field, direction: dir });
-
-  const cancelEdit = () => onSetEdit(null);
-
-  const saveEdit = (dir: 'deliver' | 'receive', rowIndex: number, field: keyof Obligation, value: number) => {
-    if (dir === 'deliver') onUpdateDeliver(rowIndex, field, value);
-    else onUpdateReceive(rowIndex, field, value);
-    onSetEdit(null);
-  };
-
-  const tabTo = (dir: 'deliver' | 'receive', rowIndex: number, field: 'amountAsset' | 'amountUsd', forward: boolean) => {
-    const obligations = dir === 'deliver' ? deliverObligations : receiveObligations;
-    if (field === 'amountAsset' && forward) {
-      onSetEdit({ rowIndex, field: 'amountUsd', direction: dir });
-    } else if (field === 'amountUsd' && forward) {
-      const next = rowIndex + 1;
-      if (next < obligations.length) onSetEdit({ rowIndex: next, field: 'amountAsset', direction: dir });
-      else if (dir === 'deliver' && receiveObligations.length > 0) onSetEdit({ rowIndex: 0, field: 'amountAsset', direction: 'receive' });
-      else onSetEdit(null);
-    } else if (field === 'amountUsd' && !forward) {
-      onSetEdit({ rowIndex, field: 'amountAsset', direction: dir });
-    } else if (field === 'amountAsset' && !forward) {
-      const prev = rowIndex - 1;
-      if (prev >= 0) onSetEdit({ rowIndex: prev, field: 'amountUsd', direction: dir });
-      else if (dir === 'receive' && deliverObligations.length > 0)
-        onSetEdit({ rowIndex: deliverObligations.length - 1, field: 'amountUsd', direction: 'deliver' });
-      else onSetEdit(null);
-    }
-  };
+  const isEditable = batchStatus === 'Draft' || batchStatus === 'Pending';
+  const allObligations = [...deliverObligations, ...receiveObligations];
+  const anyLynqEligible = allObligations.some(isLynqEligible);
+  const anyRefNumber = allObligations.some(o => !!o.refNumber);
+  const availableAssets = Array.from(new Set(allObligations.map(o => o.asset))).sort();
+  const totalCols = 3 + (anyRefNumber ? 1 : 0) + (showClearing ? 2 : 0) + (anyLynqEligible ? 1 : 0) + 1;
 
   return (
-    <div className="rounded-xl overflow-hidden bg-white dark:bg-[var(--color-2)] border border-gray-100 dark:border-[var(--border)]">
-      {/* Table header */}
-      <div className="flex items-center gap-3 px-5 py-3 border-b border-gray-100 dark:border-[var(--border)]">
-        <span className="text-xs font-semibold text-gray-700 dark:text-gray-200">Obligations</span>
-        <span className="text-[10px] text-gray-400 dark:text-gray-500">{allRows.length} lines</span>
-        <div className="flex-1" />
-        {onAddObligation && !newRow && (
+    <div className="rounded-2xl overflow-hidden bg-gray-300 dark:bg-[#131417] shadow-md">
+      {/* Search + filter toolbar */}
+      <div className="flex items-center gap-2 px-4 pt-4">
+        <div className="relative flex-1">
+          <Search aria-hidden="true" className="absolute left-2 top-1/2 -translate-y-1/2 w-3 h-3 text-gray-400 dark:text-gray-500 pointer-events-none" strokeWidth={2} />
+          <input
+            type="text"
+            aria-label={anyRefNumber ? 'Filter obligations by asset or reference number' : 'Filter obligations by asset'}
+            placeholder={anyRefNumber ? 'Filter by asset or ref…' : 'Filter by asset…'}
+            value={tableSearch}
+            onChange={(e) => setTableSearch(e.target.value)}
+            className="w-full pl-6 pr-2 py-1 text-[11px] bg-gray-50 dark:bg-[var(--surface-3)] border border-gray-200 dark:border-[var(--border)] rounded-md text-gray-700 dark:text-gray-200 placeholder-gray-400 focus:outline-none focus:ring-1 focus:ring-[var(--color-700)]"
+          />
+        </div>
+
+        {/* Asset multi-select */}
+        <div className="relative" ref={assetMenuRef}>
           <button
-            type="button"
-            onClick={() => setNewRow({ dir: 'deliver', asset: 'BTC', amountAsset: '', amountUsd: '' })}
-            className="flex items-center gap-1 text-[10px] font-semibold text-[var(--color-700)] dark:text-[var(--color-300)] bg-[var(--color-50)] dark:bg-[var(--color-950)]/20 border border-[var(--color-200)] dark:border-[var(--color-900)] hover:bg-[var(--color-100)] dark:hover:bg-[var(--color-950)]/30 px-2 py-1 rounded-full transition-colors"
+            aria-label="Filter by assets"
+            aria-haspopup="listbox"
+            aria-expanded={showAssetMenu}
+            onClick={() => setShowAssetMenu(v => !v)}
+            onKeyDown={(e) => { if (e.key === 'Escape') setShowAssetMenu(false); }}
+            className={`flex items-center gap-1 text-[11px] px-2.5 py-1 border rounded-md transition-colors ${
+              assetFilter.size > 0
+                ? 'bg-[var(--color-50)] dark:bg-[var(--color-950)]/20 border-[var(--color-300)] dark:border-[var(--color-700)] text-[var(--color-700)] dark:text-[var(--color-300)]'
+                : 'border-gray-200 dark:border-[var(--border)] text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-[var(--surface-3)]'
+            }`}
           >
-            <Plus aria-hidden="true" className="w-3 h-3" strokeWidth={2.5} />
-            Add obligation
+            {assetFilter.size === 0
+              ? 'All assets'
+              : assetFilter.size === 1
+                ? Array.from(assetFilter)[0]
+                : `${assetFilter.size} assets`}
+            <ChevronDown aria-hidden="true" className={`w-3 h-3 transition-transform duration-150 ${showAssetMenu ? 'rotate-180' : ''}`} strokeWidth={2} />
           </button>
-        )}
-      </div>
-      <table className="w-full table-compact text-xs">
-        <thead>
-          <tr className="bg-gray-50 dark:bg-[var(--color-1)] text-gray-600 dark:text-gray-400 border-b border-gray-200 dark:border-[var(--border)] text-[10px] uppercase tracking-wide">
-            <th className="text-left pl-3 pr-1 py-2 font-medium w-20">Direction</th>
-            <th className="text-left px-2 py-2 font-medium w-16">Asset</th>
-            <th className="text-right px-2 py-2 font-medium">Amount</th>
-            {showClearing && (
-              <th className="text-right px-2 py-2 font-medium">
-                <span className="relative inline-flex items-center justify-end gap-1">
-                  Cleared
-                  <Info
-                    aria-hidden="true"
-                    className="w-3 h-3 text-gray-400 dark:text-gray-500 flex-shrink-0 cursor-default"
-                    strokeWidth={2}
-                    onMouseEnter={() => setShowClearedTip(true)}
-                    onMouseLeave={() => setShowClearedTip(false)}
-                  />
-                  {showClearedTip && (
-                    <div role="tooltip" className="absolute right-0 top-full mt-0.5 w-56 z-50 bg-white dark:bg-[var(--color-1)] border border-gray-200 dark:border-[var(--border)] rounded-lg shadow-lg p-3 text-left normal-case tracking-normal font-normal whitespace-normal pointer-events-none">
-                      <p className="text-xs font-semibold text-gray-700 dark:text-white mb-1">From prior Cycles</p>
-                      <p className="text-2xs text-gray-500 dark:text-gray-300 leading-relaxed">Amount already netted through bilateral Cycles that have run on this batch.</p>
-                    </div>
-                  )}
-                </span>
-              </th>
-            )}
-            {showClearing && <th className="text-right px-2 py-2 font-medium">Remaining</th>}
-            {hasAnyLynqEligible && <th className="text-right pr-3 py-2 font-medium w-px whitespace-nowrap">Settle</th>}
-            {onRemoveObligation && <th className="w-0 p-0" />}
-          </tr>
-        </thead>
-        <tbody>
-          {allRows.length === 0 && (
-            <tr>
-              <td colSpan={showClearing ? 5 : 3} className="text-center py-6 text-gray-400 dark:text-gray-500 text-xs italic">No obligations</td>
-            </tr>
-          )}
-          {allRows.map(({ dir, ob, idx }) => {
-            const isDeliver = dir === 'deliver';
-            return (
-              <tr
-                key={`${dir}-${idx}`}
-                className={`group hover-row border-b border-gray-50 dark:border-[var(--border)] last:border-b-0 transition-colors ${isDeliver ? 'row-deliver' : 'row-receive'}`}
-              >
-                {/* Direction */}
-                <td className="pl-3 pr-1 py-2.5 w-20">
-                  <span className={`inline-flex items-center gap-1 text-[10px] font-semibold ${isDeliver ? 'text-red-500 dark:text-red-400' : 'text-[var(--positive)]'}`}>
-                    {isDeliver
-                      ? <BanknoteArrowUp aria-hidden="true" className="w-3.5 h-3.5 flex-shrink-0" strokeWidth={2} />
-                      : <BanknoteArrowDown aria-hidden="true" className="w-3.5 h-3.5 flex-shrink-0" strokeWidth={2} />
-                    }
-                    {isDeliver ? 'Deliver' : 'Receive'}
-                  </span>
-                </td>
-
-                {/* Asset */}
-                <td className="px-2 py-2.5 font-medium text-gray-800 dark:text-gray-200 w-16">
-                  <span className="flex items-center gap-1.5">
-                    <CryptoIcon symbol={ob.asset} size={16} />
-                    {ob.asset}
-                  </span>
-                </td>
-
-                {/* Amount (asset) + USD value stacked */}
-                <td className="px-2 py-2 tabular-nums">
-                  <EditableCell
-                    value={ob.amountAsset}
-                    isEditing={isEditing(dir, idx, 'amountAsset')}
-                    onActivate={() => startEdit(dir, idx, 'amountAsset')}
-                    onSave={(v) => saveEdit(dir, idx, 'amountAsset', v)}
-                    onCancel={cancelEdit}
-                    onTabNext={() => tabTo(dir, idx, 'amountAsset', true)}
-                    onTabPrev={() => tabTo(dir, idx, 'amountAsset', false)}
-                  />
-                  <EditableCell
-                    value={ob.amountUsd}
-                    isEditing={isEditing(dir, idx, 'amountUsd')}
-                    onActivate={() => startEdit(dir, idx, 'amountUsd')}
-                    onSave={(v) => saveEdit(dir, idx, 'amountUsd', v)}
-                    onCancel={cancelEdit}
-                    onTabNext={() => tabTo(dir, idx, 'amountUsd', true)}
-                    onTabPrev={() => tabTo(dir, idx, 'amountUsd', false)}
-                    spanClassName="text-2xs text-gray-500 dark:text-gray-400 mt-0.5"
-                    formatFn={(v) => fmtUsdFull(v) + ' USD'}
-                  />
-                </td>
-
-                {/* Cleared asset + cleared USD stacked */}
-              {showClearing && (
-                <td className="px-2 py-2 tabular-nums text-right">
-                  <div className="text-positive-500 font-medium">
-                    {fmtAsset(ob.clearedAsset, ob.asset)}
-                  </div>
-                  <div className="text-2xs text-[var(--positive)] mt-0.5 tabular-nums">
-                    {fmtUsdFull(ob.clearedUsd)} USD
-                  </div>
-                </td>
+          {showAssetMenu && (
+            <div className="absolute right-0 top-full mt-1 bg-white dark:bg-[var(--color-2)] border border-gray-200 dark:border-[var(--border)] rounded-lg shadow-lg overflow-hidden z-30 dropdown-enter min-w-[140px] max-h-64 overflow-y-auto">
+              {assetFilter.size > 0 && (
+                <button
+                  onClick={() => setAssetFilter(new Set())}
+                  className="w-full text-left px-3 py-1.5 text-[11px] hover-item transition-colors text-gray-500 dark:text-gray-400 border-b border-gray-100 dark:border-[var(--border)]"
+                >
+                  Clear selection
+                </button>
               )}
-
-              {/* Remaining asset + remaining USD stacked */}
-              {showClearing && (
-                <td className="px-2 py-2 tabular-nums text-right">
-                  {ob.remainingAsset > 0 ? (
-                    <>
-                      <div className="text-gray-700 dark:text-gray-200 font-medium">
-                        {fmtAsset(ob.remainingAsset, ob.asset)}
-                      </div>
-                      <div className="text-2xs text-gray-500 dark:text-gray-400 mt-0.5 tabular-nums">
-                        {fmtUsdFull(ob.remainingUsd)} USD
-                      </div>
-                    </>
-                  ) : (
-                    <span className="inline-flex items-center text-[10px] font-semibold text-[var(--positive)] bg-[var(--positive)]/10 rounded px-1.5 py-0.5">
-                      ✓ Full
-                    </span>
-                  )}
-                </td>
-              )}
-
-              {/* Settle with Lynq */}
-              {hasAnyLynqEligible && (
-                <td className="pr-1 py-2 text-right">
-                  {isLynqEligible(ob) && (
-                    <button
-                      onClick={() => onSettleWithLynq(ob)}
-                      className="inline-flex items-center gap-1 text-[10px] font-semibold text-[#1e8dc9] border border-[#1e8dc9]/40 hover:bg-[#1e8dc9]/10 px-2 py-1 rounded-full transition-colors whitespace-nowrap"
-                    >
-                      Settle with Lynq
-                    </button>
-                  )}
-                </td>
-              )}
-              {/* Remove — zero-width floating cell, no layout impact */}
-              {onRemoveObligation && (
-                <td className="w-0 p-0 overflow-visible" style={{ position: 'sticky', right: 0 }}>
+              {availableAssets.map(asset => {
+                const checked = assetFilter.has(asset);
+                return (
                   <button
-                    onClick={() => onRemoveObligation(dir, idx)}
-                    aria-label="Remove obligation"
-                    className="opacity-0 group-hover:opacity-100 absolute right-2 top-1/2 -translate-y-1/2 w-5 h-5 flex items-center justify-center rounded-full bg-white dark:bg-[var(--color-2)] border border-gray-100 dark:border-[var(--border)] shadow-sm text-gray-400 dark:text-gray-500 hover:text-red-500 dark:hover:text-red-400 hover:border-red-200 dark:hover:border-red-800 transition-all"
+                    key={asset}
+                    onClick={() => {
+                      setAssetFilter(prev => {
+                        const next = new Set(prev);
+                        if (next.has(asset)) next.delete(asset);
+                        else next.add(asset);
+                        return next;
+                      });
+                    }}
+                    className={`w-full flex items-center gap-2 text-left px-3 py-1.5 text-[11px] hover-item transition-colors ${checked ? 'font-semibold text-gray-900 dark:text-gray-100' : 'text-gray-600 dark:text-gray-300'}`}
                   >
-                    <Trash2 aria-hidden="true" className="w-2.5 h-2.5" strokeWidth={2.5} />
+                    <span className={`w-3 h-3 rounded-sm border flex items-center justify-center flex-shrink-0 ${checked ? 'bg-[var(--color-700)] border-[var(--color-700)] dark:bg-[var(--color-300)] dark:border-[var(--color-300)]' : 'border-gray-300 dark:border-[var(--border)]'}`}>
+                      {checked && <Check aria-hidden="true" className="w-2.5 h-2.5 text-white dark:text-gray-900" strokeWidth={3} />}
+                    </span>
+                    <CryptoIcon symbol={asset} size={12} />
+                    {asset}
                   </button>
-                </td>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Deliver + Receive cards */}
+      <div className="p-4 space-y-2 bg-gray-300 dark:bg-[#131417]">
+        {(['deliver', 'receive'] as const).map((dir) => {
+          const isDeliver = dir === 'deliver';
+          const obligations = isDeliver ? deliverObligations : receiveObligations;
+          const totalUsd = obligations.reduce((s, o) => s + o.amountUsd, 0);
+          const isExpanded = isDeliver ? expandedDeliver : expandedReceive;
+          const toggleExpanded = () => isDeliver ? setExpandedDeliver(v => !v) : setExpandedReceive(v => !v);
+          const DirIcon = isDeliver ? ArrowUp : ArrowDown;
+          const dirColor = isDeliver ? 'text-[var(--negative)]' : 'text-[var(--positive)]';
+          const dirBg = isDeliver ? 'bg-[var(--negative)]/10' : 'bg-[var(--positive)]/10';
+
+          const filteredObligations = obligations.filter(ob => {
+            if (assetFilter.size > 0 && !assetFilter.has(ob.asset)) return false;
+            if (tableSearch) {
+              const q = tableSearch.toLowerCase();
+              if (!ob.asset.toLowerCase().includes(q) && !(ob.refNumber?.toLowerCase().includes(q))) return false;
+            }
+            return true;
+          });
+
+          const sectionClearedUsd = obligations.reduce((s, o) => s + o.clearedUsd, 0);
+          const sectionRemainingUsd = obligations.reduce((s, o) => s + o.remainingUsd, 0);
+
+          return (
+            <div key={dir} className="border border-gray-200 dark:border-[var(--border)] rounded-xl overflow-hidden">
+              {/* Card header */}
+              <button
+                className="w-full flex items-center gap-3 px-4 py-3 bg-white dark:bg-[var(--surface-1)] hover:bg-gray-50 dark:hover:bg-[var(--surface-2)] transition-colors text-left"
+                onClick={toggleExpanded}
+                aria-expanded={isExpanded}
+              >
+                <div className={`w-8 h-8 rounded-full ${dirBg} flex items-center justify-center flex-shrink-0`}>
+                  <DirIcon size={16} className={dirColor} aria-hidden strokeWidth={2} />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-semibold text-gray-800 dark:text-gray-100">{isDeliver ? 'Deliver' : 'Receive'}</p>
+                  <p className="text-[10px] text-gray-400 dark:text-gray-500 mt-0.5">
+                    {obligations.length} obligation{obligations.length !== 1 ? 's' : ''}{' '}
+                    · {fmtUsdFull(totalUsd)}
+                    {showClearing && sectionClearedUsd > 0 && (
+                      <> · <span className={dirColor}>{fmtUsdFull(sectionClearedUsd)} cleared</span></>
+                    )}
+                  </p>
+                </div>
+                {isExpanded
+                  ? <ChevronDown size={14} className="text-gray-400 dark:text-gray-500 flex-shrink-0" aria-hidden />
+                  : <ChevronRight size={14} className="text-gray-400 dark:text-gray-500 flex-shrink-0" aria-hidden />
+                }
+              </button>
+
+              {/* Detail table */}
+              {isExpanded && (
+                <table className="w-full text-xs whitespace-nowrap bg-white dark:bg-[#0C0D0F]">
+                  <thead>
+                    <tr className="bg-gray-50 dark:bg-[#0C0D0F] text-gray-500 dark:text-gray-400 border-b border-gray-100 dark:border-[var(--border)] text-[10px] uppercase tracking-wide">
+                      <th className="text-left pl-4 pr-2 py-2 font-medium w-20">Asset</th>
+                      <th className="text-right px-2 py-2 font-medium">Amount</th>
+                      <th className="text-right px-2 py-2 font-medium text-gray-400 dark:text-gray-500">USD</th>
+                      {anyRefNumber && <th className="text-left px-2 py-2 font-medium">Ref</th>}
+                      {showClearing && (
+                        <th className="text-right px-2 py-2 font-medium relative">
+                          <span className="inline-flex items-center justify-end gap-1">
+                            Cleared
+                            <Info
+                              aria-hidden="true"
+                              className="w-3 h-3 text-gray-400 dark:text-gray-500 cursor-default"
+                              strokeWidth={2}
+                              onMouseEnter={() => setShowClearedTip(true)}
+                              onMouseLeave={() => setShowClearedTip(false)}
+                            />
+                            {showClearedTip && (
+                              <div role="tooltip" className="absolute right-0 top-full mt-0.5 w-56 z-50 bg-white dark:bg-[var(--color-1)] border border-gray-200 dark:border-[var(--border)] rounded-lg shadow-lg p-3 text-left normal-case tracking-normal font-normal whitespace-normal pointer-events-none">
+                                <p className="text-xs font-semibold text-gray-700 dark:text-white mb-1">From prior Cycles</p>
+                                <p className="text-2xs text-gray-500 dark:text-gray-300 leading-relaxed">Amount already netted through bilateral Cycles that have run on this batch.</p>
+                              </div>
+                            )}
+                          </span>
+                        </th>
+                      )}
+                      {showClearing && <th className="text-right px-2 py-2 font-medium">Remaining</th>}
+                      {anyLynqEligible && <th className="text-right pr-3 py-2 font-medium w-px">Settle</th>}
+                      <th className="w-0 p-0" />
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {/* Empty state */}
+                    {obligations.length === 0 && newRow?.dir !== dir && (
+                      <tr>
+                        <td colSpan={totalCols} className="text-center py-4 text-gray-400 dark:text-gray-500 text-2xs italic">
+                          No {isDeliver ? 'outgoing' : 'incoming'} obligations
+                        </td>
+                      </tr>
+                    )}
+
+                    {/* No-results */}
+                    {filteredObligations.length === 0 && obligations.length > 0 && (tableSearch || assetFilter.size > 0) && (
+                      <tr>
+                        <td colSpan={totalCols} className="text-center py-4 text-gray-400 dark:text-gray-500 text-2xs italic">
+                          No {isDeliver ? 'deliver' : 'receive'} results{tableSearch ? ` for "${tableSearch}"` : ''}
+                        </td>
+                      </tr>
+                    )}
+
+                    {/* Obligation rows */}
+                    {filteredObligations.map((ob, idx) => (
+                      <tr
+                        key={`${dir}-${idx}`}
+                        className={`group hover-row border-b border-gray-50 dark:border-[var(--border)] last:border-b-0 transition-colors ${isDeliver ? 'row-deliver' : 'row-receive'}`}
+                      >
+                        {/* Asset */}
+                        <td className="pl-4 pr-2 py-2 w-20">
+                          {isEditable ? (
+                            <div className="flex items-center gap-1.5">
+                              <CryptoIcon symbol={ob.asset} size={16} />
+                              <select
+                                value={ob.asset}
+                                onChange={(e) => {
+                                  const asset = e.target.value;
+                                  const price = ASSET_USD[asset] ?? 1;
+                                  const newUsd = ob.amountAsset * price;
+                                  const update = isDeliver ? onUpdateDeliver : onUpdateReceive;
+                                  update(idx, 'asset' as keyof Obligation, asset);
+                                  update(idx, 'amountUsd', newUsd);
+                                  update(idx, 'remainingAsset', ob.amountAsset - ob.clearedAsset);
+                                  update(idx, 'remainingUsd', newUsd - ob.clearedUsd);
+                                }}
+                                className="text-[11px] font-semibold bg-transparent border border-transparent hover:border-gray-200 dark:hover:border-[var(--border)] focus:border-[var(--color-700)] focus:outline-none rounded px-1 py-0.5 text-gray-800 dark:text-gray-200 cursor-pointer"
+                                aria-label="Asset"
+                              >
+                                {['BTC','ETH','USDC','USDT','SOL','BNB','XRP','ADA','MATIC','DAI'].map(a => (
+                                  <option key={a} value={a}>{a}</option>
+                                ))}
+                              </select>
+                            </div>
+                          ) : (
+                            <span className="flex items-center gap-1.5 font-semibold text-gray-800 dark:text-gray-200">
+                              <CryptoIcon symbol={ob.asset} size={16} />
+                              {ob.asset}
+                            </span>
+                          )}
+                        </td>
+
+                        {/* Amount */}
+                        <td className="px-2 py-2 text-right tabular-nums">
+                          {isEditable ? (
+                            <input
+                              type="text"
+                              inputMode="decimal"
+                              value={ob.amountAsset > 0 ? ob.amountAsset.toLocaleString(undefined, { maximumFractionDigits: 8 }) : ''}
+                              onChange={(e) => {
+                                const formatted = formatNumInput(e.target.value, 8);
+                                e.target.value = formatted;
+                                const v = parseFloat(stripCommas(formatted)) || 0;
+                                const price = ASSET_USD[ob.asset] ?? 1;
+                                const update = isDeliver ? onUpdateDeliver : onUpdateReceive;
+                                update(idx, 'amountAsset', v);
+                                update(idx, 'amountUsd', v * price);
+                                update(idx, 'remainingAsset', v - ob.clearedAsset);
+                                update(idx, 'remainingUsd', (v * price) - ob.clearedUsd);
+                              }}
+                              onKeyDown={(e) => {
+                                if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+                                  e.preventDefault();
+                                  const dir = e.key === 'ArrowUp' ? 1 : -1;
+                                  const step = e.shiftKey ? 10 : 1;
+                                  const v = Math.max(0, ob.amountAsset + dir * step);
+                                  const price = ASSET_USD[ob.asset] ?? 1;
+                                  const update = isDeliver ? onUpdateDeliver : onUpdateReceive;
+                                  update(idx, 'amountAsset', v);
+                                  update(idx, 'amountUsd', v * price);
+                                  update(idx, 'remainingAsset', v - ob.clearedAsset);
+                                  update(idx, 'remainingUsd', (v * price) - ob.clearedUsd);
+                                }
+                              }}
+                              className="w-28 text-right text-[11px] font-medium bg-transparent border border-transparent hover:border-gray-200 dark:hover:border-[var(--border)] focus:border-[var(--color-700)] focus:outline-none rounded px-1.5 py-0.5 text-gray-800 dark:text-gray-200 tabular-nums"
+                              aria-label="Amount"
+                            />
+                          ) : (
+                            <span className="font-medium text-gray-800 dark:text-gray-100">
+                              {ob.amountAsset.toLocaleString(undefined, { maximumFractionDigits: 8 })}
+                            </span>
+                          )}
+                        </td>
+
+                        {/* USD value */}
+                        <td className="px-2 py-2 text-right tabular-nums text-[11px]">
+                          {isEditable ? (
+                            <input
+                              type="text"
+                              inputMode="decimal"
+                              value={ob.amountUsd > 0 ? ob.amountUsd.toLocaleString(undefined, { maximumFractionDigits: 2 }) : ''}
+                              onChange={(e) => {
+                                const formatted = formatNumInput(e.target.value, 2);
+                                e.target.value = formatted;
+                                const usd = parseFloat(stripCommas(formatted)) || 0;
+                                const price = ASSET_USD[ob.asset] ?? 1;
+                                const asset = price > 0 ? usd / price : 0;
+                                const update = isDeliver ? onUpdateDeliver : onUpdateReceive;
+                                update(idx, 'amountUsd', usd);
+                                update(idx, 'amountAsset', asset);
+                                update(idx, 'remainingUsd', usd - ob.clearedUsd);
+                                update(idx, 'remainingAsset', asset - ob.clearedAsset);
+                              }}
+                              onKeyDown={(e) => {
+                                if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+                                  e.preventDefault();
+                                  const dir = e.key === 'ArrowUp' ? 1 : -1;
+                                  const step = e.shiftKey ? 100 : 1;
+                                  const usd = Math.max(0, ob.amountUsd + dir * step);
+                                  const price = ASSET_USD[ob.asset] ?? 1;
+                                  const asset = price > 0 ? usd / price : 0;
+                                  const update = isDeliver ? onUpdateDeliver : onUpdateReceive;
+                                  update(idx, 'amountUsd', usd);
+                                  update(idx, 'amountAsset', asset);
+                                  update(idx, 'remainingUsd', usd - ob.clearedUsd);
+                                  update(idx, 'remainingAsset', asset - ob.clearedAsset);
+                                }
+                              }}
+                              className="w-28 text-right text-[11px] bg-transparent border border-transparent hover:border-gray-200 dark:hover:border-[var(--border)] focus:border-[var(--color-700)] focus:outline-none rounded px-1.5 py-0.5 text-gray-400 dark:text-gray-500 tabular-nums"
+                              aria-label="USD value"
+                            />
+                          ) : (
+                            <span className="text-gray-400 dark:text-gray-500">
+                              {fmtUsdFull(ob.amountUsd)}
+                            </span>
+                          )}
+                        </td>
+
+                        {/* Ref number */}
+                        {anyRefNumber && (
+                          <td className="px-2 py-2 text-left text-[10px] text-gray-400 dark:text-gray-500">
+                            {ob.refNumber ?? '—'}
+                          </td>
+                        )}
+
+                        {/* Cleared */}
+                        {showClearing && (
+                          <td className={`px-2 py-2 text-right tabular-nums font-medium ${isDeliver ? 'text-[var(--negative)]' : 'text-[var(--positive)]'}`}>
+                            − {ob.clearedAsset.toLocaleString(undefined, { maximumFractionDigits: 8 })}
+                            <div className="text-[10px] text-gray-400 dark:text-gray-500">
+                              {fmtUsdFull(ob.clearedUsd)}
+                            </div>
+                          </td>
+                        )}
+
+                        {/* Remaining */}
+                        {showClearing && (
+                          <td className="px-2 py-2 text-right tabular-nums font-medium text-gray-800 dark:text-gray-100">
+                            = {ob.remainingAsset.toLocaleString(undefined, { maximumFractionDigits: 8 })}
+                            <div className="text-[10px] text-gray-400 dark:text-gray-500">
+                              {fmtUsdFull(ob.remainingUsd)}
+                            </div>
+                          </td>
+                        )}
+
+                        {/* Settle */}
+                        {anyLynqEligible && (
+                          <td className="pr-3 py-2 text-right">
+                            {isLynqEligible(ob) && (
+                              <button
+                                onClick={() => onSettleWithLynq(ob)}
+                                className="text-[10px] font-semibold text-[#1e8dc9] border border-[#1e8dc9]/40 bg-[#1e8dc9]/10 hover:bg-[#1e8dc9]/20 px-2 py-0.5 rounded-full transition-colors whitespace-nowrap"
+                              >
+                                Settle with Lynq
+                              </button>
+                            )}
+                          </td>
+                        )}
+
+                        {/* Actions: move + delete */}
+                        <td className="pl-1 pr-3 py-2">
+                          <div className="flex items-center gap-1 justify-end">
+                            <button
+                              onClick={() => onMoveObligation(dir, idx)}
+                              className="opacity-0 group-hover:opacity-100 transition-opacity text-[10px] text-gray-400 dark:text-gray-500 hover:text-gray-700 dark:hover:text-gray-200 whitespace-nowrap px-1.5 py-0.5 rounded hover:bg-gray-100 dark:hover:bg-[var(--surface-3)]"
+                              aria-label={`Move to ${isDeliver ? 'receive' : 'deliver'}`}
+                            >
+                              ↕ {isDeliver ? 'Receive' : 'Deliver'}
+                            </button>
+                            {onRemoveObligation && (
+                              <button
+                                onClick={() => onRemoveObligation(dir, idx)}
+                                className="opacity-0 group-hover:opacity-100 transition-opacity text-gray-300 dark:text-gray-600 hover:text-red-400 dark:hover:text-red-400 p-0.5 rounded"
+                                aria-label="Remove obligation"
+                              >
+                                <Trash2 aria-hidden="true" className="w-3 h-3" strokeWidth={2} />
+                              </button>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+
+                    {/* Inline new-row form */}
+                    {newRow?.dir === dir && (
+                      <tr className={`border-t border-gray-100 dark:border-[var(--border)] bg-[var(--color-50)]/40 dark:bg-[var(--color-950)]/10 ${isDeliver ? 'row-deliver' : 'row-receive'}`}>
+                        <td className="pl-4 pr-2 py-2 w-20">
+                          <div className="flex items-center gap-1.5">
+                            <CryptoIcon symbol={newRow.asset} size={16} />
+                            <select
+                              value={newRow.asset}
+                              onChange={(e) => {
+                                const asset = e.target.value;
+                                const price = ASSET_USD[asset] ?? 1;
+                                const amtAsset = parseFloat(newRow.amountAsset) || 0;
+                                setNewRow({ ...newRow, asset, amountUsd: amtAsset > 0 ? String((amtAsset * price).toFixed(2)) : '' });
+                              }}
+                              className="text-[11px] font-semibold bg-transparent border border-transparent hover:border-gray-200 dark:hover:border-[var(--border)] focus:border-[var(--color-700)] focus:outline-none rounded px-1 py-0.5 text-gray-800 dark:text-gray-200 cursor-pointer"
+                              aria-label="Asset"
+                            >
+                              {['BTC','ETH','USDC','USDT','SOL','BNB','XRP','ADA','MATIC','DAI'].map(a => (
+                                <option key={a} value={a}>{a}</option>
+                              ))}
+                            </select>
+                          </div>
+                        </td>
+                        <td className="px-2 py-2 text-right tabular-nums">
+                          <input
+                            type="text"
+                            inputMode="decimal"
+                            placeholder="0"
+                            value={formatNumInput(newRow.amountAsset, 8)}
+                            onChange={(e) => {
+                              const formatted = formatNumInput(e.target.value, 8);
+                              const cleaned = stripCommas(formatted);
+                              const price = ASSET_USD[newRow.asset] ?? 1;
+                              const usd = parseFloat(cleaned) > 0 ? String((parseFloat(cleaned) * price).toFixed(2)) : '';
+                              setNewRow({ ...newRow, amountAsset: cleaned, amountUsd: usd });
+                            }}
+                            onKeyDown={(e) => {
+                              if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+                                e.preventDefault();
+                                const dir = e.key === 'ArrowUp' ? 1 : -1;
+                                const step = e.shiftKey ? 10 : 1;
+                                const cur = parseFloat(stripCommas(newRow.amountAsset || '0')) || 0;
+                                const next = Math.max(0, cur + dir * step);
+                                const price = ASSET_USD[newRow.asset] ?? 1;
+                                const usd = next > 0 ? String((next * price).toFixed(2)) : '';
+                                setNewRow({ ...newRow, amountAsset: String(next), amountUsd: usd });
+                              }
+                            }}
+                            className="w-28 text-right text-[11px] font-medium bg-transparent border border-transparent hover:border-gray-200 dark:hover:border-[var(--border)] focus:border-[var(--color-700)] focus:outline-none rounded px-1.5 py-0.5 text-gray-800 dark:text-gray-200 tabular-nums"
+                            aria-label="Amount"
+                            autoFocus
+                          />
+                        </td>
+                        <td className="px-2 py-2 text-right tabular-nums text-[11px]">
+                          <input
+                            type="text"
+                            inputMode="decimal"
+                            placeholder="0"
+                            value={formatNumInput(newRow.amountUsd, 2)}
+                            onChange={(e) => {
+                              const formatted = formatNumInput(e.target.value, 2);
+                              const cleaned = stripCommas(formatted);
+                              const usd = parseFloat(cleaned);
+                              const price = ASSET_USD[newRow.asset] ?? 1;
+                              const asset = price > 0 && usd > 0 ? String((usd / price).toFixed(8).replace(/\.?0+$/, '')) : '';
+                              setNewRow({ ...newRow, amountUsd: cleaned, amountAsset: asset });
+                            }}
+                            onKeyDown={(e) => {
+                              if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+                                e.preventDefault();
+                                const dir = e.key === 'ArrowUp' ? 1 : -1;
+                                const step = e.shiftKey ? 100 : 1;
+                                const cur = parseFloat(stripCommas(newRow.amountUsd || '0')) || 0;
+                                const next = Math.max(0, cur + dir * step);
+                                const price = ASSET_USD[newRow.asset] ?? 1;
+                                const asset = price > 0 && next > 0 ? String((next / price).toFixed(8).replace(/\.?0+$/, '')) : '';
+                                setNewRow({ ...newRow, amountUsd: String(next), amountAsset: asset });
+                              }
+                            }}
+                            className="w-28 text-right text-[11px] bg-transparent border border-transparent hover:border-gray-200 dark:hover:border-[var(--border)] focus:border-[var(--color-700)] focus:outline-none rounded px-1.5 py-0.5 text-gray-400 dark:text-gray-500 tabular-nums"
+                            aria-label="USD value"
+                          />
+                        </td>
+                        {anyRefNumber && <td className="px-2 py-2 text-right text-[10px] text-gray-300 dark:text-gray-600">—</td>}
+                        {showClearing && <td className="px-2 py-2 text-right text-[10px] text-gray-300 dark:text-gray-600">—</td>}
+                        {showClearing && <td className="px-2 py-2 text-right text-[10px] text-gray-300 dark:text-gray-600">—</td>}
+                        {anyLynqEligible && <td className="pr-3 py-2" />}
+                        <td className="pl-1 pr-3 py-2">
+                          <div className="flex items-center gap-1 justify-end">
+                            <button
+                              onClick={confirmNewRow}
+                              disabled={!(parseFloat(newRow.amountAsset) > 0)}
+                              className="text-[10px] font-semibold bg-[#CDF698] text-gray-900 hover:bg-[var(--color-200)] px-2 py-0.5 rounded disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                            >
+                              Add
+                            </button>
+                            <button
+                              onClick={() => setNewRow(null)}
+                              className="text-[10px] text-gray-400 hover:text-gray-600 px-1.5 py-0.5 rounded"
+                            >
+                              ✕
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+
+                    {/* Bottom add-row */}
+                    {onAddObligation && newRow?.dir !== dir && (
+                      <tr
+                        className="cursor-pointer hover:bg-gray-50 dark:hover:bg-[var(--surface-3)] transition-colors"
+                        onClick={() => setNewRow({ dir, asset: 'BTC', amountAsset: '', amountUsd: '' })}
+                      >
+                        <td
+                          colSpan={totalCols}
+                          className="pl-4 pr-3 py-2 text-[10px] font-semibold text-[var(--color-700)] dark:text-[var(--color-300)] hover:underline border-t border-dashed border-gray-100 dark:border-[var(--border)]"
+                        >
+                          + Add {isDeliver ? 'deliver' : 'receive'} obligation
+                        </td>
+                      </tr>
+                    )}
+
+                    {/* Subtotal footer row (cleared batches) */}
+                    {showClearing && obligations.length > 0 && (
+                      <tr className="border-t border-gray-100 dark:border-[var(--border)] bg-gray-50 dark:bg-[#0C0D0F]">
+                        <td className="pl-4 pr-2 py-2 text-[10px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide" colSpan={3 + (anyRefNumber ? 1 : 0)}>
+                          Subtotal
+                        </td>
+                        <td className={`px-2 py-2 text-right tabular-nums text-xs font-bold ${isDeliver ? 'text-[var(--negative)]' : 'text-[var(--positive)]'}`}>
+                          − {fmtUsdFull(sectionClearedUsd)}
+                        </td>
+                        <td className="pr-3 py-2 text-right tabular-nums text-xs font-bold text-gray-800 dark:text-gray-100">
+                          = {fmtUsdFull(sectionRemainingUsd)}
+                        </td>
+                        {anyLynqEligible && <td className="pr-3 py-2" />}
+                        <td className="w-0 p-0" />
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
               )}
-            </tr>
+            </div>
           );
         })}
-        {/* Inline new-obligation row */}
-        {newRow && (
-          <tr className="border-t border-gray-100 dark:border-[var(--border)] bg-[var(--color-50)]/40 dark:bg-[var(--color-950)]/10">
-            {/* Direction toggle — icon + color pill buttons */}
-            <td className="pl-3 pr-1 py-2">
-              <div className="flex items-center gap-0.5 rounded-full border border-gray-200 dark:border-[var(--border)] bg-white dark:bg-[var(--color-2)] p-0.5 w-fit">
-                {(['deliver', 'receive'] as const).map((d) => (
-                  <button
-                    key={d}
-                    type="button"
-                    onClick={() => setNewRow({ ...newRow, dir: d })}
-                    className={`flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold transition-colors ${
-                      newRow.dir === d
-                        ? d === 'deliver'
-                          ? 'bg-red-50 dark:bg-red-900/20 text-red-500 dark:text-red-400'
-                          : 'bg-[var(--positive)]/10 text-[var(--positive)]'
-                        : 'text-gray-400 dark:text-gray-500 hover:text-gray-600'
-                    }`}
-                  >
-                    {d === 'deliver'
-                      ? <BanknoteArrowUp aria-hidden="true" className="w-3 h-3 flex-shrink-0" strokeWidth={2} />
-                      : <BanknoteArrowDown aria-hidden="true" className="w-3 h-3 flex-shrink-0" strokeWidth={2} />
-                    }
-                    {d.charAt(0).toUpperCase() + d.slice(1)}
-                  </button>
-                ))}
-              </div>
-            </td>
-            {/* Asset — crypto icon + native select */}
-            <td className="px-2 py-2">
-              <div className="flex items-center gap-1.5">
-                <CryptoIcon symbol={newRow.asset} size={16} />
-                <select
-                  value={newRow.asset}
-                  onChange={(e) => {
-                    const asset = e.target.value;
-                    const price = ASSET_USD[asset] ?? 1;
-                    const amtAsset = parseFloat(newRow.amountAsset) || 0;
-                    setNewRow({ ...newRow, asset, amountUsd: amtAsset > 0 ? String((amtAsset * price).toFixed(2)) : '' });
-                  }}
-                  className="text-[10px] font-semibold border border-gray-200 dark:border-[var(--border)] bg-white dark:bg-[var(--color-2)] rounded px-1.5 py-1 text-gray-700 dark:text-gray-200 focus:outline-none focus:ring-1 focus:ring-[#CDF698] w-20"
-                >
-                  {['BTC','ETH','USDC','USDT','SOL','BNB','XRP','ADA','MATIC','DAI'].map((a) => (
-                    <option key={a} value={a}>{a}</option>
-                  ))}
-                </select>
-              </div>
-            </td>
-            {/* Amount asset */}
-            <td className="px-2 py-2">
-              <input
-                type="number"
-                min="0"
-                step="any"
-                placeholder="0"
-                value={newRow.amountAsset}
-                onChange={(e) => {
-                  const v = e.target.value;
-                  const price = ASSET_USD[newRow.asset] ?? 1;
-                  const usd = parseFloat(v) > 0 ? String((parseFloat(v) * price).toFixed(2)) : '';
-                  setNewRow({ ...newRow, amountAsset: v, amountUsd: usd });
-                }}
-                className="w-full text-right text-[10px] border border-gray-200 dark:border-[var(--border)] bg-white dark:bg-[var(--color-2)] rounded px-1.5 py-1 text-gray-700 dark:text-gray-200 focus:outline-none focus:ring-1 focus:ring-[#CDF698]"
-                autoFocus
-              />
-              {newRow.amountUsd && (
-                <div className="text-right text-2xs text-gray-400 dark:text-gray-500 mt-0.5 tabular-nums pr-0.5">
-                  {fmtUsdFull(parseFloat(newRow.amountUsd))} USD
-                </div>
-              )}
-            </td>
-            {/* Cleared — empty for new row */}
-            {showClearing && <td className="px-2 py-2 text-right text-[10px] text-gray-300 dark:text-gray-600">—</td>}
-            {/* Remaining — empty for new row */}
-            {showClearing && <td className="px-2 py-2 text-right text-[10px] text-gray-300 dark:text-gray-600">—</td>}
-            {/* Cancel / Confirm — cancel first, confirm second */}
-            <td className={`${hasAnyLynqEligible ? '' : 'pr-3'} py-2 text-right`}>
-              <div className="flex items-center justify-end gap-1">
-                <button
-                  type="button"
-                  onClick={() => setNewRow(null)}
-                  className="w-6 h-6 flex items-center justify-center rounded-full bg-gray-100 dark:bg-[var(--surface-3)] hover:bg-gray-200 dark:hover:bg-[var(--surface-2)] transition-colors"
-                  aria-label="Cancel"
-                >
-                  <X aria-hidden="true" className="w-3 h-3 text-gray-500 dark:text-gray-400" strokeWidth={2.5} />
-                </button>
-                <button
-                  type="button"
-                  onClick={confirmNewRow}
-                  disabled={!newRow.amountAsset || parseFloat(newRow.amountAsset) <= 0}
-                  className="w-6 h-6 flex items-center justify-center rounded-full bg-[var(--positive)] hover:opacity-90 disabled:opacity-30 disabled:cursor-not-allowed transition-opacity"
-                  aria-label="Confirm obligation"
-                >
-                  <Check aria-hidden="true" className="w-3 h-3 text-white" strokeWidth={3} />
-                </button>
-              </div>
-            </td>
-            {hasAnyLynqEligible && <td className="pr-3 py-2" />}
-          </tr>
-        )}
-        </tbody>
-        {allRows.length > 0 && (
-          <tfoot>
-            <tr className="border-t border-gray-200 dark:border-[var(--border)] bg-gray-50 dark:bg-[var(--color-1)]">
-              <td className="pl-3 pr-1 py-2.5 text-[10px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide" colSpan={2}>Total</td>
-              <td className={`${showClearing ? 'px-2' : 'pr-3'} py-2.5 text-right tabular-nums text-xs font-bold text-gray-800 dark:text-gray-100`}>
-                {fmtUsdFull(totalUsd)}
-              </td>
-              {showClearing && (
-                <td className="px-2 py-2.5 text-right tabular-nums text-xs font-bold text-[var(--positive)]">
-                  {fmtUsdFull(clearedUsd)}
-                </td>
-              )}
-              {showClearing && (
-                <td className="pr-3 py-2.5 text-right tabular-nums text-xs font-bold text-gray-700 dark:text-gray-200">
-                  {fmtUsdFull(allRows.reduce((s, r) => s + r.ob.remainingUsd, 0))}
-                </td>
-              )}
-              {hasAnyLynqEligible && <td className="pr-3 py-2.5" />}
-              {onRemoveObligation && <td className="w-0 p-0" />}
-            </tr>
-          </tfoot>
-        )}
-      </table>
+      </div>
     </div>
   );
 }
@@ -679,13 +830,13 @@ const EVENT_STYLES: Record<ActivityEventType, { icon: React.ReactNode; dot: stri
   status_change:    { icon: <RefreshCw  className="w-3 h-3" strokeWidth={2}   />, dot: 'bg-amber-400 dark:bg-amber-500' },
   obligation_edit:  { icon: <Pencil     className="w-3 h-3" strokeWidth={2}   />, dot: 'bg-gray-400 dark:bg-gray-500' },
   cycle_included:   { icon: <CheckCircle className="w-3 h-3" strokeWidth={2}  />, dot: 'bg-[var(--positive)]' },
-  settlement:       { icon: <BanknoteArrowUp className="w-3 h-3" strokeWidth={2} />, dot: 'bg-[var(--positive)]' },
+  settlement:       { icon: <ArrowUp className="w-3 h-3" strokeWidth={2} />, dot: 'bg-[var(--positive)]' },
 };
 
 function ActivityCard({ entries }: { entries: ActivityEntry[] }) {
-  const [open, setOpen] = useState(true);
+  const [open, setOpen] = useState(false);
   return (
-    <div className="rounded-xl border border-gray-100 dark:border-[var(--border)] overflow-hidden bg-white dark:bg-[var(--color-2)]">
+    <div className="rounded-xl shadow-md dark:shadow-[0_8px_24px_rgba(0,0,0,0.5)] overflow-hidden bg-white dark:bg-[var(--color-2)]">
       <button
         onClick={() => setOpen(v => !v)}
         className="hover-item w-full flex items-center justify-between px-4 py-2.5 text-left transition-colors"
@@ -746,7 +897,6 @@ function ActivityCard({ entries }: { entries: ActivityEntry[] }) {
 }
 
 function BatchDetail({ batch, onUpdate }: BatchDetailProps) {
-  const [editState, setEditState] = useState<EditState | null>(null);
   const [showGuide, setShowGuide] = useState(false);
   const [settlementTarget, setSettlementTarget] = useState<SettlementTarget | null>(null);
   const [confirmingReject, setConfirmingReject] = useState(false);
@@ -767,36 +917,61 @@ function BatchDetail({ batch, onUpdate }: BatchDetailProps) {
   const remainingUsd = totalUsd - clearedUsd;
   const pct = totalUsd > 0 ? Math.round((clearedUsd / totalUsd) * 100) : 0;
 
-  const updateDeliver = (index: number, field: keyof Obligation, value: number) => {
+  const deliverTotalUsd    = batch.deliverObligations.reduce((s, o) => s + o.amountUsd, 0);
+  const deliverClearedUsd  = batch.deliverObligations.reduce((s, o) => s + o.clearedUsd, 0);
+  const deliverRemainingUsd = batch.deliverObligations.reduce((s, o) => s + o.remainingUsd, 0);
+  const receiveTotalUsd    = batch.receiveObligations.reduce((s, o) => s + o.amountUsd, 0);
+  const receiveClearedUsd  = batch.receiveObligations.reduce((s, o) => s + o.clearedUsd, 0);
+  const receiveRemainingUsd = batch.receiveObligations.reduce((s, o) => s + o.remainingUsd, 0);
+
+  const updateDeliver = (index: number, field: keyof Obligation, value: number | string) => {
     const updated = batch.deliverObligations.map((o, i) =>
       i === index ? { ...o, [field]: value } : o
     );
     onUpdate({ ...batch, deliverObligations: updated });
   };
 
-  const updateReceive = (index: number, field: keyof Obligation, value: number) => {
+  const updateReceive = (index: number, field: keyof Obligation, value: number | string) => {
     const updated = batch.receiveObligations.map((o, i) =>
       i === index ? { ...o, [field]: value } : o
     );
     onUpdate({ ...batch, receiveObligations: updated });
   };
 
+  const moveObligation = (fromDir: 'deliver' | 'receive', index: number) => {
+    if (fromDir === 'deliver') {
+      const ob = batch.deliverObligations[index];
+      onUpdate({
+        ...batch,
+        deliverObligations: batch.deliverObligations.filter((_, i) => i !== index),
+        receiveObligations: [...batch.receiveObligations, ob],
+      });
+    } else {
+      const ob = batch.receiveObligations[index];
+      onUpdate({
+        ...batch,
+        receiveObligations: batch.receiveObligations.filter((_, i) => i !== index),
+        deliverObligations: [...batch.deliverObligations, ob],
+      });
+    }
+  };
+
   // Determine the primary CTA based on current status + origin
   const primaryCta =
     batch.status === 'Draft' && batch.origin === 'created'
-      ? { label: 'Send to Counterparty', icon: <ChevronRight aria-hidden="true" className="w-4 h-4" strokeWidth={2.5} />, action: () => onUpdate({ ...batch, status: 'Pending' }), prominent: false }
+      ? { label: 'Send to counterparty', icon: <ChevronRight aria-hidden="true" className="w-4 h-4" strokeWidth={2.5} />, action: () => onUpdate({ ...batch, status: 'Pending' }), prominent: false }
     : batch.status === 'Pending' && batch.origin === 'requested'
-      ? { label: 'Ascertain Batch', icon: <Check aria-hidden="true" className="w-4 h-4" strokeWidth={2.5} />, action: () => onUpdate({ ...batch, status: 'Ascertained' }), prominent: true }
+      ? { label: 'Approve batch', icon: <Check aria-hidden="true" className="w-4 h-4" strokeWidth={2.5} />, action: () => onUpdate({ ...batch, status: 'Approved' }), prominent: true }
     : null;
 
   return (
-    <div className="h-full flex flex-col overflow-hidden bg-gray-50 dark:bg-[var(--color-1)]">
+    <div className="h-full overflow-y-auto bg-gray-50 dark:bg-[var(--color-1)]">
 
       {/* ── Batch header ─────────────────────────────────────────────────── */}
-      <div className="flex-shrink-0 bg-white dark:bg-[var(--color-2)] border-b border-gray-100 dark:border-[var(--border)]">
+      <div className="mt-4 mx-4">
 
         {/* Top row: identity + status + CTA */}
-        <div className="flex items-center gap-3 px-6 pt-5 pb-4">
+        <div className="flex items-center gap-3">
           <CounterpartyAvatar name={batch.counterpartyName} size={36} />
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 flex-wrap">
@@ -805,7 +980,7 @@ function BatchDetail({ batch, onUpdate }: BatchDetailProps) {
               </span>
             </div>
             <div className="flex items-center gap-2 mt-0.5">
-              <span className="text-2xs text-gray-400 dark:text-gray-500 font-mono">{batch.id}</span>
+              <span className="text-2xs text-gray-400 dark:text-gray-500">{batch.id}</span>
               <span className="text-2xs text-gray-300 dark:text-gray-600">·</span>
               <span className="text-2xs text-gray-400 dark:text-gray-500">Cutoff {fmtCutoff(batch.cutoffTime)}</span>
             </div>
@@ -819,19 +994,6 @@ function BatchDetail({ batch, onUpdate }: BatchDetailProps) {
                 <span className="w-1.5 h-1.5 rounded-full bg-amber-500 dark:bg-amber-400 animate-pulse flex-shrink-0" />
                 Awaiting counterparty review
               </span>
-            )}
-            {/* Primary CTA (Send to Counterparty / Ascertain) */}
-            {primaryCta && (
-              <button
-                onClick={primaryCta.action}
-                className={`h-8 flex items-center px-4 rounded-full text-xs font-semibold transition-[background-color,transform,box-shadow] duration-150 active:scale-[0.97] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--color-700)] whitespace-nowrap ${
-                  primaryCta.prominent
-                    ? 'bg-[#CDF698] text-gray-900 hover:bg-[var(--color-200)] shadow-sm'
-                    : 'bg-transparent text-[var(--color-700)] dark:text-[var(--color-300)] border border-[var(--color-300)] dark:border-[var(--color-700)] hover:bg-[var(--color-50)] dark:hover:bg-[var(--color-50)]'
-                }`}
-              >
-                {primaryCta.label}
-              </button>
             )}
             {/* Reject — recipient, Pending */}
             {batch.status === 'Pending' && batch.origin === 'requested' && (
@@ -860,6 +1022,19 @@ function BatchDetail({ batch, onUpdate }: BatchDetailProps) {
                 </button>
               )
             )}
+            {/* Primary CTA (Send to Counterparty / Approve) */}
+            {primaryCta && (
+              <button
+                onClick={primaryCta.action}
+                className={`h-8 flex items-center px-4 rounded-full text-xs font-semibold transition-[background-color,transform,box-shadow] duration-150 active:scale-[0.97] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--color-700)] whitespace-nowrap ${
+                  primaryCta.prominent
+                    ? 'bg-[#CDF698] text-gray-900 hover:bg-[var(--color-200)] shadow-sm'
+                    : 'bg-transparent text-[var(--color-700)] dark:text-[var(--color-300)] border border-[var(--color-300)] dark:border-[var(--color-700)] hover:bg-[var(--color-50)] dark:hover:bg-[var(--color-50)]'
+                }`}
+              >
+                {primaryCta.label}
+              </button>
+            )}
             {/* Revoke — sender, Pending */}
             {batch.status === 'Pending' && batch.origin === 'created' && (
               <button
@@ -869,8 +1044,8 @@ function BatchDetail({ batch, onUpdate }: BatchDetailProps) {
                 Revoke
               </button>
             )}
-            {/* Cancel — either role, Ascertained */}
-            {batch.status === 'Ascertained' && (
+            {/* Cancel — either role, Approved */}
+            {batch.status === 'Approved' && (
               <button
                 onClick={() => onUpdate({ ...batch, status: 'Cancelled' })}
                 className="h-8 flex items-center px-3 rounded-full text-xs font-semibold text-gray-500 dark:text-gray-400 border border-gray-200 dark:border-[var(--border)] hover:bg-gray-100 dark:hover:bg-[var(--surface-3)] transition-colors duration-150 active:scale-[0.97] whitespace-nowrap"
@@ -878,29 +1053,11 @@ function BatchDetail({ batch, onUpdate }: BatchDetailProps) {
                 Cancel
               </button>
             )}
-            {/* Terminal state pills */}
+            {/* Terminal state pill — only Cleared is shown here; other terminal states are indicated in the batch body */}
             {batch.status === 'Cleared' && (
               <span className="flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-medium text-[var(--positive)] bg-[var(--positive)]/10 border border-[var(--positive)]/30 flex-shrink-0">
                 <Check aria-hidden="true" className="w-3.5 h-3.5" strokeWidth={2.5} />
                 Cleared
-              </span>
-            )}
-            {batch.status === 'Rejected' && (
-              <span className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/20 flex-shrink-0">
-                <X aria-hidden="true" className="w-3.5 h-3.5" strokeWidth={2.5} />
-                Rejected
-              </span>
-            )}
-            {batch.status === 'Cancelled' && (
-              <span className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium text-gray-500 dark:text-gray-400 bg-gray-100 dark:bg-[var(--surface-3)] flex-shrink-0">
-                <X aria-hidden="true" className="w-3.5 h-3.5" strokeWidth={2.5} />
-                Cancelled
-              </span>
-            )}
-            {batch.status === 'Revoked' && (
-              <span className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium text-orange-600 dark:text-orange-400 bg-orange-50 dark:bg-orange-900/20 flex-shrink-0">
-                <X aria-hidden="true" className="w-3.5 h-3.5" strokeWidth={2.5} />
-                Revoked
               </span>
             )}
           </div>
@@ -909,36 +1066,21 @@ function BatchDetail({ batch, onUpdate }: BatchDetailProps) {
       </div>
 
       {/* ── Obligations table ─────────────────────────────────────────────── */}
-      <div className="flex-1 overflow-y-auto p-5 space-y-4">
+      <div className="p-5 space-y-4">
 
         {/* ── Phase stepper card ── */}
         {(() => {
-          const TERMINAL = { Rejected: 'Rejected', Cancelled: 'Cancelled', Revoked: 'Revoked', Deleted: 'Deleted' } as Partial<Record<BatchStatus, string>>;
-          if (TERMINAL[batch.status]) {
-            const cfg: Record<string, string> = {
-              Rejected:  'text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/15 border border-red-200 dark:border-red-900/40',
-              Revoked:   'text-orange-600 dark:text-orange-400 bg-orange-50 dark:bg-orange-900/15 border border-orange-200 dark:border-orange-900/40',
-              Cancelled: 'text-gray-500 dark:text-gray-400 bg-gray-100 dark:bg-[var(--surface-3)] border border-gray-200 dark:border-[var(--border)]',
-              Deleted:   'text-gray-500 dark:text-gray-400 bg-gray-100 dark:bg-[var(--surface-3)] border border-gray-200 dark:border-[var(--border)]',
-            };
-            return (
-              <span className={`inline-flex items-center gap-1 text-[10px] font-semibold px-2.5 py-1 rounded-full ${cfg[batch.status]}`}>
-                <X aria-hidden="true" className="w-3 h-3 flex-shrink-0" strokeWidth={2.5} />
-                {TERMINAL[batch.status]}
-              </span>
-            );
-          }
           const isSender = batch.origin !== 'requested';
           const steps: { label: string; statuses: BatchStatus[] }[] = isSender
             ? [
                 { label: 'Draft',       statuses: ['Draft'] },
                 { label: 'Pending',     statuses: ['Pending'] },
-                { label: 'Ascertained', statuses: ['Ascertained'] },
+                { label: 'Approved', statuses: ['Approved'] },
                 { label: 'Cleared',     statuses: ['Cleared'] },
               ]
             : [
                 { label: 'Pending',     statuses: ['Pending', 'Draft'] },
-                { label: 'Ascertained', statuses: ['Ascertained'] },
+                { label: 'Approved', statuses: ['Approved'] },
                 { label: 'Cleared',     statuses: ['Cleared'] },
               ];
           const currentIdx = steps.findIndex(s => s.statuses.includes(batch.status));
@@ -952,14 +1094,16 @@ function BatchDetail({ batch, onUpdate }: BatchDetailProps) {
                     {i > 0 && (
                       <ChevronRight aria-hidden="true" className="w-3 h-3 text-gray-200 dark:text-gray-700 flex-shrink-0" strokeWidth={2.5} />
                     )}
-                    <span className={`inline-flex items-center gap-1 text-[10px] font-medium whitespace-nowrap ${
-                      isDone    ? 'text-[var(--positive)]' :
-                      isCurrent ? 'bg-[#CDF698]/20 text-gray-800 dark:text-gray-100 font-semibold px-2 py-0.5 rounded-full border border-[#CDF698]/40' :
-                                  'text-gray-300 dark:text-gray-600'
-                    }`}>
-                      {isDone && <Check aria-hidden="true" className="w-2.5 h-2.5 flex-shrink-0" strokeWidth={3} />}
-                      {step.label}
-                    </span>
+                    {isCurrent ? (
+                      <StatusBadge status={batch.status} pct={getBatchClearedPct(batch)} />
+                    ) : (
+                      <span className={`inline-flex items-center gap-1 text-[10px] font-medium whitespace-nowrap ${
+                        isDone ? 'text-[var(--positive)]' : 'text-gray-300 dark:text-gray-600'
+                      }`}>
+                        {isDone && <Check aria-hidden="true" className="w-2.5 h-2.5 flex-shrink-0" strokeWidth={3} />}
+                        {step.label}
+                      </span>
+                    )}
                   </React.Fragment>
                 );
               })}
@@ -967,46 +1111,50 @@ function BatchDetail({ batch, onUpdate }: BatchDetailProps) {
           );
         })()}
 
-        {/* KPI row — cleared metrics only for Ascertained / Cleared */}
-        {(() => {
-          const showCleared = batch.status === 'Cleared';
-          const kpis = showCleared
-            ? [
-                { label: 'Total',     value: fmtUsdFull(totalUsd),     sub: `${batch.deliverObligations.length + batch.receiveObligations.length} lines`, accent: '' },
-                { label: 'Cleared',   value: fmtUsdFull(clearedUsd),   sub: `${pct}% of total`,  accent: clearedUsd > 0 ? 'text-[var(--positive)]' : 'text-gray-400 dark:text-gray-500' },
-                { label: '% Cleared', value: `${pct}%`,                sub: null,                accent: pct > 0 ? 'text-[var(--positive)]' : 'text-gray-400 dark:text-gray-500', bar: true },
-                { label: 'Remaining', value: fmtUsdFull(remainingUsd), sub: remainingUsd === 0 ? 'Fully cleared' : 'Outstanding', accent: remainingUsd === 0 ? 'text-[var(--positive)]' : 'text-gray-800 dark:text-gray-100' },
-              ]
-            : [
-                { label: 'Total',     value: fmtUsdFull(totalUsd), sub: `${batch.deliverObligations.length + batch.receiveObligations.length} obligation${batch.deliverObligations.length + batch.receiveObligations.length !== 1 ? 's' : ''}`, accent: '' },
-              ];
-          const cols = showCleared ? 'grid-cols-4' : 'grid-cols-1';
-          return (
-            <div className={`grid ${cols} gap-4`}>
-              {kpis.map(({ label, value, sub, accent, bar }) => (
-                <div key={label} className="bg-white dark:bg-[var(--color-2)] rounded-xl border border-gray-100 dark:border-[var(--border)] px-5 py-4">
-                  <p className="text-[10px] text-gray-400 dark:text-gray-500 uppercase tracking-wide font-medium mb-1">{label}</p>
-                  <p className={`text-base font-bold tabular-nums ${accent || 'text-gray-900 dark:text-gray-100'}`}>{value}</p>
-                  {bar ? (
-                    <div className="cleared-bar mt-2">
-                      <div className="cleared-bar-fill" style={{ width: `${pct}%` }} />
-                    </div>
-                  ) : (
-                    <p className="text-[10px] text-gray-400 dark:text-gray-500 mt-0.5">{sub}</p>
-                  )}
+        {/* KPI tiles — per-direction summary */}
+        <div className="grid grid-cols-2 gap-4">
+          {([
+            { label: 'To deliver', icon: ArrowUp,   color: 'text-[var(--negative)]', total: deliverTotalUsd, cleared: deliverClearedUsd, remaining: deliverRemainingUsd, count: batch.deliverObligations.length },
+            { label: 'To receive', icon: ArrowDown, color: 'text-[var(--positive)]', total: receiveTotalUsd, cleared: receiveClearedUsd, remaining: receiveRemainingUsd, count: batch.receiveObligations.length },
+          ] as const).map(({ label, icon: Icon, color, total, cleared, remaining, count }) => (
+            <div key={label} className="bg-white dark:bg-[var(--color-2)] rounded-xl shadow-md dark:shadow-[0_8px_24px_rgba(0,0,0,0.5)] px-5 py-4">
+              <div className="flex items-center justify-between mb-3">
+                <div className="flex items-center gap-1.5">
+                  <Icon aria-hidden="true" className={`w-3.5 h-3.5 ${color}`} strokeWidth={2} />
+                  <p className={`text-[10px] uppercase tracking-wide font-semibold ${color}`}>{label}</p>
                 </div>
-              ))}
+                <span className="text-[10px] text-gray-400 dark:text-gray-500 tabular-nums">
+                  {count} {count === 1 ? 'line' : 'lines'}
+                </span>
+              </div>
+              {batch.status === 'Cleared' ? (
+                <div className="space-y-2">
+                  <div className="flex items-baseline justify-between gap-2">
+                    <span className="text-[10px] text-gray-400 dark:text-gray-500 flex-shrink-0">Original</span>
+                    <span className="text-sm font-bold tabular-nums text-gray-800 dark:text-gray-100">{fmtUsdFull(total)}</span>
+                  </div>
+                  <div className="flex items-baseline justify-between gap-2">
+                    <span className="text-[10px] text-gray-400 dark:text-gray-500 flex-shrink-0">Cleared</span>
+                    <span className={`text-sm font-bold tabular-nums ${color}`}>− {fmtUsdFull(cleared)}</span>
+                  </div>
+                  <div className="flex items-baseline justify-between gap-2">
+                    <span className="text-[10px] text-gray-400 dark:text-gray-500 flex-shrink-0">Remaining</span>
+                    <span className="text-sm font-bold tabular-nums text-gray-800 dark:text-gray-100">= {fmtUsdFull(remaining)}</span>
+                  </div>
+                </div>
+              ) : (
+                <p className="text-lg font-bold tabular-nums text-gray-800 dark:text-gray-100">{fmtUsdFull(total)}</p>
+              )}
             </div>
-          );
-        })()}
+          ))}
+        </div>
 
         <CombinedObligationTable
           deliverObligations={batch.deliverObligations}
           receiveObligations={batch.receiveObligations}
           onUpdateDeliver={updateDeliver}
           onUpdateReceive={updateReceive}
-          editState={editState}
-          onSetEdit={setEditState}
+          onMoveObligation={moveObligation}
           batchStatus={batch.status}
           counterpartyName={batch.counterpartyName}
           onSettleWithLynq={handleSettleWithLynq}
@@ -1038,7 +1186,7 @@ function BatchDetail({ batch, onUpdate }: BatchDetailProps) {
         )}
 
         {/* Reference card — collapsible */}
-        <div className="rounded-xl border border-gray-100 dark:border-[var(--border)] overflow-hidden bg-white dark:bg-[var(--color-2)]">
+        <div className="rounded-xl shadow-md dark:shadow-[0_8px_24px_rgba(0,0,0,0.5)] overflow-hidden bg-white dark:bg-[var(--color-2)]">
           <button
             onClick={() => setShowGuide((v) => !v)}
             className="hover-item w-full flex items-center justify-between px-5 py-3 text-left transition-colors"
@@ -1067,7 +1215,7 @@ function BatchDetail({ batch, onUpdate }: BatchDetailProps) {
                   ] as const).map(({ key, desc }) => (
                     <div key={key} className="flex items-center gap-2">
                       <dt className="shrink-0">
-                        <kbd className="font-mono text-2xs bg-gray-50 dark:bg-[var(--surface-3)] text-gray-600 dark:text-gray-300 px-1.5 py-0.5 rounded border border-gray-200 dark:border-[var(--border)] whitespace-nowrap">{key}</kbd>
+                        <kbd className="text-2xs bg-gray-50 dark:bg-[var(--surface-3)] text-gray-600 dark:text-gray-300 px-1.5 py-0.5 rounded border border-gray-200 dark:border-[var(--border)] whitespace-nowrap">{key}</kbd>
                       </dt>
                       <dd className="text-2xs text-gray-500 dark:text-gray-400">{desc}</dd>
                     </div>
@@ -1252,7 +1400,10 @@ function buildBatch(parsed: ParsedBatch): Batch {
   const deliverObligations = parsed.obligations.filter(o => o.direction === 'deliver').map(toObligation);
   const receiveObligations = parsed.obligations.filter(o => o.direction === 'receive').map(toObligation);
   const totalUsd = parsed.obligations.reduce((s, o) => s + o.amountUsd, 0);
-  return { id, counterpartyName: parsed.counterpartyName, cutoffTime: new Date().toISOString(), status: 'Draft', totalUsd, deliverObligations, receiveObligations };
+  // Default cutoff: tomorrow at 11:00 UTC, formatted as `YYYY-MM-DD HH:MM` to match fmtCutoff().
+  const tomorrow = new Date(Date.now() + 24 * 60 * 60 * 1000);
+  const cutoffTime = `${tomorrow.toISOString().slice(0, 10)} 11:00`;
+  return { id, counterpartyName: parsed.counterpartyName, cutoffTime, status: 'Draft', totalUsd, deliverObligations, receiveObligations };
 }
 
 // ── ImportModal ────────────────────────────────────────────────────────────────
@@ -1262,463 +1413,532 @@ interface ImportModalProps {
   onClose: () => void;
 }
 
+type ImportStep = 'upload' | 'validate' | 'review' | 'submit' | 'complete';
+type SubmitMode = 'draft' | 'direct';
+
+const STEP_ORDER: ImportStep[] = ['upload', 'validate', 'review', 'submit', 'complete'];
+const STEP_LABELS: Record<ImportStep, string> = {
+  upload: 'Upload',
+  validate: 'Validate',
+  review: 'Review',
+  submit: 'Submit',
+  complete: 'Done',
+};
+
 function ImportModal({ onConfirm, onClose }: ImportModalProps) {
+  const [step, setStep] = useState<ImportStep>('upload');
   const [raw, setRaw] = useState('');
-  const [step, setStep] = useState<'input' | 'preview'>('input');
+  const [fileName, setFileName] = useState<string | null>(null);
+  const [fileSize, setFileSize] = useState<number>(0);
   const [parseResult, setParseResult] = useState<ParseResult | null>(null);
   const [parseError, setParseError] = useState('');
+  const [submitMode, setSubmitMode] = useState<SubmitMode>('draft');
+  const [importedBatches, setImportedBatches] = useState<Batch[]>([]);
+  const [expandedBatches, setExpandedBatches] = useState<Set<number>>(new Set());
   const fileRef = useRef<HTMLInputElement>(null);
+  const [isDragging, setIsDragging] = useState(false);
 
-  const handleKey = (e: React.KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+  const handleKey = (e: React.KeyboardEvent) => { if (e.key === 'Escape' && step !== 'complete') onClose(); };
 
-  const handleParse = () => {
-    if (!raw.trim()) return;
-    const result = parseInput(raw.trim());
-    if (result.batches.length === 0) {
-      setParseError('No obligations could be parsed. Check the format and try again.');
+  const processFile = (file: File) => {
+    if (!/\.(csv|txt)$/i.test(file.name)) {
+      setParseError('Only .csv or .txt files are supported.');
       return;
     }
-    setParseError('');
-    setParseResult(result);
-    setStep('preview');
-  };
-
-  const handleConfirm = () => {
-    if (!parseResult) return;
-    onConfirm(parseResult.batches.map(buildBatch));
+    setFileName(file.name);
+    setFileSize(file.size);
+    const reader = new FileReader();
+    reader.onload = (ev) => { setRaw(ev.target?.result as string ?? ''); setParseError(''); };
+    reader.readAsText(file);
   };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    const reader = new FileReader();
-    reader.onload = (ev) => { setRaw(ev.target?.result as string ?? ''); setParseError(''); };
-    reader.readAsText(file);
+    processFile(file);
     e.target.value = '';
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(false);
+    const file = e.dataTransfer.files?.[0];
+    if (!file) return;
+    processFile(file);
+  };
+
+  const clearFile = () => {
+    setFileName(null);
+    setFileSize(0);
+    setRaw('');
+    setParseError('');
+  };
+
+  const runValidation = (): boolean => {
+    if (!raw.trim()) return false;
+    const result = parseInput(raw.trim());
+    if (result.batches.length === 0) {
+      setParseError('No obligations could be parsed. Check the format and try again.');
+      setParseResult(null);
+      return false;
+    }
+    setParseError('');
+    setParseResult(result);
+    return true;
+  };
+
+  const goNext = () => {
+    if (step === 'upload') {
+      if (runValidation()) setStep('validate');
+    } else if (step === 'validate') {
+      setStep('review');
+    } else if (step === 'review') {
+      setStep('submit');
+    } else if (step === 'submit') {
+      finalize();
+    }
+  };
+
+  const goBack = () => {
+    if (step === 'validate') setStep('upload');
+    else if (step === 'review') setStep('validate');
+    else if (step === 'submit') setStep('review');
+  };
+
+  const finalize = () => {
+    if (!parseResult) return;
+    const status: BatchStatus = submitMode === 'direct' ? 'Pending' : 'Draft';
+    const batches = parseResult.batches.map(b => ({ ...buildBatch(b), status }));
+    setImportedBatches(batches);
+    setStep('complete');
+  };
+
+  const handleDone = () => {
+    onConfirm(importedBatches);
+  };
+
+  const toggleBatchExpand = (idx: number) => {
+    setExpandedBatches(prev => {
+      const next = new Set(prev);
+      if (next.has(idx)) next.delete(idx);
+      else next.add(idx);
+      return next;
+    });
   };
 
   const totalObl = parseResult?.batches.reduce((s, b) => s + b.obligations.length, 0) ?? 0;
   const n = parseResult?.batches.length ?? 0;
+  const fileSizeKb = fileSize > 0 ? (fileSize / 1024).toFixed(1) : null;
+
+  const currentStepIdx = STEP_ORDER.indexOf(step);
+  const canGoNext = (() => {
+    if (step === 'upload') return raw.trim().length > 0;
+    if (step === 'validate') return parseResult !== null && parseResult.batches.length > 0;
+    if (step === 'review') return true;
+    if (step === 'submit') return true;
+    return false;
+  })();
 
   return (
-    <div className="modal-overlay" onClick={(e) => e.target === e.currentTarget && onClose()}>
+    <div className="modal-overlay" onClick={(e) => e.target === e.currentTarget && step !== 'complete' && onClose()}>
       <div
-        className="bg-white dark:bg-[var(--color-1)] rounded-lg shadow-xl w-full max-w-lg mx-4 overflow-hidden border border-gray-200 dark:border-[var(--border)]"
+        className="bg-white dark:bg-[var(--color-1)] rounded-lg shadow-xl w-full max-w-2xl mx-4 overflow-hidden border border-gray-200 dark:border-[var(--border)]"
         role="dialog"
         aria-modal="true"
         aria-labelledby="import-modal-title"
         onKeyDown={handleKey}
       >
         {/* Header */}
-        <div className="flex items-center justify-between px-5 py-4 border-b border-gray-200 dark:border-[var(--border)]">
+        <div className="flex items-center justify-between px-5 py-3 border-b border-gray-200 dark:border-[var(--border)]">
           <div className="flex items-center gap-2">
-            {step === 'input' ? (
-              <>
-                <div className="w-6 h-6 rounded bg-[var(--color-50)] dark:bg-[var(--color-950)]/20 flex items-center justify-center">
-                  <Upload aria-hidden="true" className="w-3.5 h-3.5 text-[var(--color-700)] dark:text-[var(--color-300)]" strokeWidth={2} />
-                </div>
-                <span id="import-modal-title" className="text-sm font-semibold text-gray-900 dark:text-gray-100">
-                  Import Obligations
-                </span>
-              </>
-            ) : (
-              <>
-                <div className="w-6 h-6 rounded bg-positive-50 dark:bg-positive-900/30 flex items-center justify-center">
-                  <CheckCircle aria-hidden="true" className="w-3.5 h-3.5 text-positive-600 dark:text-positive-400" strokeWidth={2} />
-                </div>
-                <span id="import-modal-title" className="text-sm font-semibold text-gray-900 dark:text-gray-100">
-                  Preview — {n} batch{n !== 1 ? 'es' : ''} found
-                </span>
-              </>
-            )}
+            <div className="w-6 h-6 rounded bg-[var(--color-50)] dark:bg-[var(--color-950)]/20 flex items-center justify-center">
+              <Upload aria-hidden="true" className="w-3.5 h-3.5 text-[var(--color-700)] dark:text-[var(--color-300)]" strokeWidth={2} />
+            </div>
+            <span id="import-modal-title" className="text-sm font-semibold text-gray-900 dark:text-gray-100">
+              Import obligations
+            </span>
           </div>
           <button onClick={onClose} className="text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 transition-colors rounded-full p-0.5" aria-label="Close">
             <X aria-hidden="true" className="w-4 h-4" strokeWidth={2} />
           </button>
         </div>
 
+        {/* Stepper */}
+        <div className="px-5 py-3 bg-gray-50 dark:bg-[var(--surface-3)] border-b border-gray-200 dark:border-[var(--border)]">
+          <ol className="flex items-center gap-1">
+            {STEP_ORDER.map((s, i) => {
+              const isDone = i < currentStepIdx;
+              const isCurrent = i === currentStepIdx;
+              return (
+                <React.Fragment key={s}>
+                  {i > 0 && (
+                    <span className={`flex-1 h-px ${isDone ? 'bg-[var(--positive)]' : 'bg-gray-200 dark:bg-gray-600'}`} />
+                  )}
+                  <li className="flex items-center gap-1.5">
+                    <span
+                      className={`w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0 text-[10px] font-semibold tabular-nums ${
+                        isDone ? 'bg-[var(--positive)] text-white' :
+                        isCurrent ? 'bg-[var(--color-700)] text-white dark:bg-[var(--color-300)] dark:text-gray-900' :
+                        'bg-gray-200 dark:bg-gray-600 text-gray-400 dark:text-gray-500'
+                      }`}
+                    >
+                      {isDone ? <Check aria-hidden="true" className="w-3 h-3" strokeWidth={3} /> : i + 1}
+                    </span>
+                    <span className={`text-[11px] font-medium whitespace-nowrap ${
+                      isCurrent ? 'text-gray-900 dark:text-gray-100' :
+                      isDone ? 'text-[var(--positive)]' :
+                      'text-gray-400 dark:text-gray-500'
+                    }`}>
+                      {STEP_LABELS[s]}
+                    </span>
+                  </li>
+                </React.Fragment>
+              );
+            })}
+          </ol>
+        </div>
+
         {/* Body */}
-        {step === 'input' ? (
-          <div className="px-5 py-4 space-y-4">
-            {/* Supported formats card */}
-            <div className="bg-gray-50 dark:bg-[var(--surface-3)] rounded-lg px-4 py-3 space-y-1.5">
-              <p className="text-2xs font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide">Supported formats</p>
-              <div className="space-y-1">
-                <p className="text-2xs text-gray-500 dark:text-gray-400">
-                  <span className="font-medium text-gray-700 dark:text-gray-200">Position CSV</span>
-                  {' — '}<code className="font-mono bg-gray-100 dark:bg-gray-600 px-1 rounded">quantity, asset, direction, usd_equivalent</code>
-                </p>
-                <p className="text-2xs text-gray-500 dark:text-gray-400">
-                  <span className="font-medium text-gray-700 dark:text-gray-200">Batch Export</span>
-                  {' — '}19-column CSV with Batch ID, Counterparty, Token, Direction…
-                </p>
-                <p className="text-2xs text-gray-500 dark:text-gray-400">
-                  <span className="font-medium text-gray-700 dark:text-gray-200">Text</span>
-                  {' — '}<code className="font-mono bg-gray-100 dark:bg-gray-600 px-1 rounded">"Company pays 100 BTC"</code> or <code className="font-mono bg-gray-100 dark:bg-gray-600 px-1 rounded">"receives 50,000 USDC"</code>
-                </p>
-              </div>
-            </div>
-
-            {/* File upload */}
-            <div>
+        <div className="px-5 py-4 min-h-[280px] max-h-[60vh] overflow-y-auto">
+          {step === 'upload' && (
+            <div className="space-y-3">
+              {/* File upload area — drag & drop + click to browse */}
               <input ref={fileRef} type="file" accept=".csv,.txt" className="sr-only" aria-label="Upload CSV or text file" onChange={handleFileChange} />
-              <button
-                onClick={() => fileRef.current?.click()}
-                className="hover-item w-full flex items-center justify-center gap-2 px-3 py-2.5 border border-dashed border-gray-300 dark:border-[var(--border)] rounded-lg text-xs text-gray-500 dark:text-gray-400 hover:border-[var(--color-700)] hover:text-[var(--color-700)] dark:hover:text-[var(--color-300)] transition-colors"
-              >
-                <FileText aria-hidden="true" className="w-3.5 h-3.5" strokeWidth={2} />
-                Click to upload a .csv or .txt file
-              </button>
-            </div>
+              {fileName ? (
+                <div className="flex items-center justify-between gap-3 px-4 py-3 bg-[var(--positive)]/10 border border-[var(--positive)]/30 rounded-lg">
+                  <div className="flex items-center gap-2.5">
+                    <CheckCircle aria-hidden="true" className="w-4 h-4 text-[var(--positive)] flex-shrink-0" strokeWidth={2} />
+                    <div>
+                      <p className="text-xs font-semibold text-gray-800 dark:text-gray-200">{fileName}</p>
+                      <p className="text-2xs text-gray-500 dark:text-gray-400 mt-0.5">
+                        {fileSizeKb} KB · file accepted
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={clearFile}
+                    className="text-2xs text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 transition-colors"
+                  >
+                    Replace
+                  </button>
+                </div>
+              ) : (
+                <div
+                  onClick={() => fileRef.current?.click()}
+                  onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); fileRef.current?.click(); } }}
+                  onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
+                  onDragEnter={(e) => { e.preventDefault(); setIsDragging(true); }}
+                  onDragLeave={(e) => {
+                    if (e.currentTarget.contains(e.relatedTarget as Node)) return;
+                    setIsDragging(false);
+                  }}
+                  onDrop={handleDrop}
+                  role="button"
+                  tabIndex={0}
+                  aria-label="Upload a .csv or .txt file by drag and drop or click to browse"
+                  className={`w-full rounded-xl border-2 border-dashed transition-colors cursor-pointer px-6 py-10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[oklch(0.683_0.106_127.892_/_0.45)] ${
+                    isDragging
+                      ? 'border-[var(--color-700)] bg-[var(--color-50)] dark:bg-[var(--color-950)]/30'
+                      : 'border-gray-300 dark:border-[var(--border)] bg-gray-50/40 dark:bg-[var(--surface-3)]/30 hover:border-[var(--color-700)] hover:bg-[var(--color-50)] dark:hover:bg-[var(--color-950)]/20'
+                  }`}
+                >
+                  <div className="flex flex-col items-center gap-3 pointer-events-none">
+                    <div className={`w-12 h-12 rounded-full flex items-center justify-center transition-colors ${
+                      isDragging
+                        ? 'bg-[var(--color-700)] text-white dark:bg-[var(--color-300)] dark:text-gray-900'
+                        : 'bg-gray-100 dark:bg-[var(--surface-2)] text-gray-500 dark:text-gray-400'
+                    }`}>
+                      <Upload aria-hidden="true" className="w-5 h-5" strokeWidth={2} />
+                    </div>
+                    <div className="text-center">
+                      <p className="text-sm font-semibold text-gray-700 dark:text-gray-200">
+                        {isDragging ? 'Drop file to upload' : 'Drag and drop, or click to browse'}
+                      </p>
+                      <p className="text-2xs text-gray-400 dark:text-gray-500 mt-1.5">
+                        Supports .csv or .txt · Position CSV, Batch Export CSV, or natural-language statements
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
 
-            {/* Divider */}
-            <div className="flex items-center gap-3">
-              <div className="flex-1 h-px bg-gray-200 dark:bg-gray-600" />
-              <span className="text-2xs text-gray-400 dark:text-gray-500">or paste below</span>
-              <div className="flex-1 h-px bg-gray-200 dark:bg-gray-600" />
+              {parseError && (
+                <div className="flex items-start gap-2 px-3 py-2 bg-[var(--negative)]/10 border border-[var(--negative)]/30 rounded-lg">
+                  <AlertCircle aria-hidden="true" className="w-3.5 h-3.5 text-[var(--negative)] flex-shrink-0 mt-0.5" strokeWidth={2} />
+                  <p className="text-2xs text-[var(--negative)]">{parseError}</p>
+                </div>
+              )}
             </div>
+          )}
 
-            {/* Textarea */}
-            <div>
-              <label htmlFor="import-textarea" className="block text-2xs font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide mb-1.5">
-                Paste obligations
-              </label>
-              <textarea
-                id="import-textarea"
-                value={raw}
-                onChange={(e) => { setRaw(e.target.value); setParseError(''); }}
-                placeholder={`– FalconX pays 100 BTC\n– FalconX receives 50,000 USDC\n\nOr paste CSV data…`}
-                className="w-full text-xs font-mono px-3 py-2.5 border border-gray-300 dark:border-[var(--border)] rounded-lg resize-none bg-white dark:bg-[var(--surface-3)] text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[oklch(0.683_0.106_127.892_/_0.45)] focus-visible:border-[oklch(0.683_0.106_127.892)] transition-colors"
-                rows={8}
-                autoFocus
-              />
-            </div>
-
-            {/* Inline parse error */}
-            {parseError && (
-              <div className="flex items-start gap-2 px-3 py-2 bg-negative-50 dark:bg-negative-900/20 border border-negative-200 dark:border-negative-800 rounded-lg">
-                <AlertCircle aria-hidden="true" className="w-3.5 h-3.5 text-negative-500 flex-shrink-0 mt-0.5" strokeWidth={2} />
-                <p className="text-2xs text-negative-700 dark:text-negative-400">{parseError}</p>
-              </div>
-            )}
-          </div>
-        ) : (
-          <div className="px-5 py-4 space-y-3">
-            {/* Warnings */}
-            {parseResult && parseResult.warnings.length > 0 && (
-              <div className="flex items-start gap-2 px-3 py-2 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg">
-                <AlertCircle aria-hidden="true" className="w-3.5 h-3.5 text-amber-500 flex-shrink-0 mt-0.5" strokeWidth={2} />
-                <div className="space-y-0.5">
-                  <p className="text-2xs font-semibold text-amber-700 dark:text-amber-400">
-                    {parseResult.warnings.length} line{parseResult.warnings.length !== 1 ? 's' : ''} skipped
+          {step === 'validate' && parseResult && (
+            <div className="space-y-3">
+              {/* Summary */}
+              <div className="grid grid-cols-3 gap-3">
+                <div className="px-3 py-2.5 bg-gray-50 dark:bg-[var(--surface-3)] rounded-lg">
+                  <p className="text-2xs text-gray-500 dark:text-gray-400 uppercase tracking-wide font-medium">Batches</p>
+                  <p className="text-lg font-bold tabular-nums text-gray-900 dark:text-gray-100 mt-0.5">{n}</p>
+                </div>
+                <div className="px-3 py-2.5 bg-gray-50 dark:bg-[var(--surface-3)] rounded-lg">
+                  <p className="text-2xs text-gray-500 dark:text-gray-400 uppercase tracking-wide font-medium">Obligations</p>
+                  <p className="text-lg font-bold tabular-nums text-gray-900 dark:text-gray-100 mt-0.5">{totalObl}</p>
+                </div>
+                <div className="px-3 py-2.5 bg-gray-50 dark:bg-[var(--surface-3)] rounded-lg">
+                  <p className="text-2xs text-gray-500 dark:text-gray-400 uppercase tracking-wide font-medium">Issues</p>
+                  <p className={`text-lg font-bold tabular-nums mt-0.5 ${parseResult.warnings.length > 0 ? 'text-amber-600 dark:text-amber-400' : 'text-[var(--positive)]'}`}>
+                    {parseResult.warnings.length}
                   </p>
-                  {parseResult.warnings.map((w, i) => (
-                    <p key={i} className="text-2xs text-amber-600 dark:text-amber-400 font-mono">{w}</p>
-                  ))}
                 </div>
               </div>
-            )}
 
-            {/* Batch list */}
-            <div className="rounded-2xl overflow-hidden divide-y divide-gray-100 dark:divide-gray-700 max-h-64 overflow-y-auto shadow-md">
-              {parseResult?.batches.map((b, i) => {
+              {parseResult.warnings.length === 0 ? (
+                <div className="flex items-center gap-2 px-3 py-2.5 bg-[var(--positive)]/10 border border-[var(--positive)]/30 rounded-lg">
+                  <CheckCircle aria-hidden="true" className="w-4 h-4 text-[var(--positive)] flex-shrink-0" strokeWidth={2} />
+                  <p className="text-xs text-gray-700 dark:text-gray-200 font-medium">All lines parsed successfully.</p>
+                </div>
+              ) : (
+                <div className="px-3 py-2.5 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg">
+                  <div className="flex items-start gap-2 mb-2">
+                    <AlertCircle aria-hidden="true" className="w-4 h-4 text-amber-600 dark:text-amber-400 flex-shrink-0 mt-0.5" strokeWidth={2} />
+                    <p className="text-xs font-semibold text-amber-700 dark:text-amber-400">
+                      {parseResult.warnings.length} {parseResult.warnings.length === 1 ? 'line was' : 'lines were'} skipped
+                    </p>
+                  </div>
+                  <ul className="space-y-0.5 ml-6">
+                    {parseResult.warnings.map((w, i) => (
+                      <li key={i} className="text-2xs text-amber-700 dark:text-amber-400">
+                        {w}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              <p className="text-2xs text-gray-500 dark:text-gray-400">
+                Continue to review the parsed obligations and confirm before submitting.
+              </p>
+            </div>
+          )}
+
+          {step === 'review' && parseResult && (
+            <div className="space-y-2">
+              <p className="text-2xs text-gray-500 dark:text-gray-400 mb-2">
+                {n} batch{n !== 1 ? 'es' : ''} · {totalObl} obligation{totalObl !== 1 ? 's' : ''}. Click a batch to expand.
+              </p>
+              {parseResult.batches.map((b, i) => {
+                const isExpanded = expandedBatches.has(i);
                 const dc = b.obligations.filter(o => o.direction === 'deliver').length;
                 const rc = b.obligations.filter(o => o.direction === 'receive').length;
                 const usd = b.obligations.reduce((s, o) => s + o.amountUsd, 0);
                 return (
-                  <div key={i} className="flex items-center justify-between px-4 py-2.5 bg-white dark:bg-[var(--color-1)]">
-                    <div className="flex items-center gap-2.5">
-                      <span className="w-1.5 h-1.5 rounded-full bg-gray-300 dark:bg-gray-600 flex-shrink-0" />
-                      <div>
-                        <p className="text-xs font-semibold text-gray-800 dark:text-gray-200">{b.counterpartyName}</p>
-                        <p className="text-2xs text-gray-500 dark:text-gray-400 mt-0.5">
-                          {dc > 0 && `${dc} deliver`}{dc > 0 && rc > 0 && ' · '}{rc > 0 && `${rc} receive`}
-                          {dc === 0 && rc === 0 && `${b.obligations.length} obligation${b.obligations.length !== 1 ? 's' : ''}`}
-                        </p>
+                  <div key={i} className="rounded-lg border border-gray-200 dark:border-[var(--border)] overflow-hidden">
+                    <button
+                      onClick={() => toggleBatchExpand(i)}
+                      className="hover-item w-full flex items-center justify-between px-3 py-2.5 text-left transition-colors"
+                      aria-expanded={isExpanded}
+                    >
+                      <div className="flex items-center gap-2">
+                        <ChevronRight
+                          aria-hidden="true"
+                          className={`w-3 h-3 text-gray-400 dark:text-gray-500 transition-transform duration-150 flex-shrink-0 ${isExpanded ? 'rotate-90' : ''}`}
+                          strokeWidth={2}
+                        />
+                        <span className="text-xs font-semibold text-gray-800 dark:text-gray-200">{b.counterpartyName}</span>
+                        <span className="text-2xs text-gray-400 dark:text-gray-500">
+                          {dc} deliver · {rc} receive
+                        </span>
                       </div>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <span className="text-2xs font-medium text-gray-500 dark:text-gray-400 bg-gray-100 dark:bg-[var(--surface-3)] px-2 py-0.5 rounded tabular-nums">
-                        Draft
-                      </span>
                       {usd > 0 && (
-                        <span className="text-2xs font-mono tabular-nums text-gray-700 dark:text-gray-300">
+                        <span className="text-2xs tabular-nums text-gray-600 dark:text-gray-300">
                           {fmtUsdCompact(usd)}
                         </span>
                       )}
-                    </div>
+                    </button>
+                    {isExpanded && (
+                      <div className="border-t border-gray-100 dark:border-[var(--border)] bg-gray-50 dark:bg-[var(--surface-3)]">
+                        <table className="w-full text-2xs">
+                          <thead>
+                            <tr className="text-gray-500 dark:text-gray-400 uppercase tracking-wide text-[9px]">
+                              <th className="text-left pl-3 pr-2 py-1.5 font-medium">Direction</th>
+                              <th className="text-left px-2 py-1.5 font-medium">Asset</th>
+                              <th className="text-right px-2 py-1.5 font-medium">Amount</th>
+                              <th className="text-right pr-3 py-1.5 font-medium">USD</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {b.obligations.map((ob, j) => (
+                              <tr key={j} className="border-t border-gray-100 dark:border-[var(--border)]">
+                                <td className={`pl-3 pr-2 py-1.5 font-semibold ${ob.direction === 'deliver' ? 'text-[var(--negative)]' : 'text-[var(--positive)]'}`}>
+                                  {ob.direction === 'deliver' ? 'Deliver' : 'Receive'}
+                                </td>
+                                <td className="px-2 py-1.5 font-medium text-gray-700 dark:text-gray-200">
+                                  <span className="flex items-center gap-1.5">
+                                    <CryptoIcon symbol={ob.asset} size={14} />
+                                    {ob.asset}
+                                  </span>
+                                </td>
+                                <td className="px-2 py-1.5 text-right tabular-nums text-gray-700 dark:text-gray-200">
+                                  {ob.amountAsset.toLocaleString(undefined, { maximumFractionDigits: 8 })}
+                                </td>
+                                <td className="pr-3 py-1.5 text-right tabular-nums text-gray-500 dark:text-gray-400">
+                                  {ob.amountUsd > 0 ? fmtUsdCompact(ob.amountUsd) : '—'}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
                   </div>
                 );
               })}
             </div>
-            <p className="text-2xs text-gray-500 dark:text-gray-400 text-center">
-              {n} batch{n !== 1 ? 'es' : ''} · {totalObl} obligation{totalObl !== 1 ? 's' : ''} · all created as Draft
-            </p>
-          </div>
-        )}
+          )}
+
+          {step === 'submit' && parseResult && (
+            <div className="space-y-3">
+              <p className="text-xs text-gray-700 dark:text-gray-200 font-semibold">
+                How should these batches be created?
+              </p>
+              {([
+                {
+                  mode: 'draft' as const,
+                  title: 'Save as drafts',
+                  desc: 'Batches will be created with status Draft. You can review and edit before sending to counterparties.',
+                  recommended: true,
+                },
+                {
+                  mode: 'direct' as const,
+                  title: 'Send to counterparties immediately',
+                  desc: 'Batches will be created with status Pending and sent to counterparties for approval. No draft step.',
+                  recommended: false,
+                },
+              ]).map(({ mode, title, desc, recommended }) => (
+                <label
+                  key={mode}
+                  className={`flex items-start gap-3 px-3 py-3 rounded-lg border cursor-pointer transition-colors ${
+                    submitMode === mode
+                      ? 'border-[var(--color-700)] dark:border-[var(--color-300)] bg-[var(--color-50)] dark:bg-[var(--color-950)]/20'
+                      : 'border-gray-200 dark:border-[var(--border)] hover:bg-gray-50 dark:hover:bg-[var(--surface-3)]'
+                  }`}
+                >
+                  <input
+                    type="radio"
+                    name="submitMode"
+                    value={mode}
+                    checked={submitMode === mode}
+                    onChange={() => setSubmitMode(mode)}
+                    className="mt-0.5"
+                  />
+                  <div className="flex-1">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-semibold text-gray-800 dark:text-gray-200">{title}</span>
+                      {recommended && (
+                        <span className="text-[9px] font-semibold text-[var(--color-700)] dark:text-[var(--color-300)] bg-[var(--color-50)] dark:bg-[var(--color-950)]/30 px-1.5 py-0.5 rounded uppercase tracking-wide">
+                          Recommended
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-2xs text-gray-500 dark:text-gray-400 mt-1">{desc}</p>
+                  </div>
+                </label>
+              ))}
+
+              <div className="px-3 py-2 bg-gray-50 dark:bg-[var(--surface-3)] rounded-lg text-2xs text-gray-600 dark:text-gray-300">
+                You're about to import <span className="font-semibold">{n} batch{n !== 1 ? 'es' : ''}</span> with <span className="font-semibold">{totalObl} obligation{totalObl !== 1 ? 's' : ''}</span> as <span className="font-semibold">{submitMode === 'direct' ? 'Pending' : 'Draft'}</span>.
+              </div>
+            </div>
+          )}
+
+          {step === 'complete' && (
+            <div className="flex flex-col items-center text-center py-6 space-y-3">
+              <div className="w-12 h-12 rounded-full bg-[var(--positive)]/15 flex items-center justify-center">
+                <CheckCircle aria-hidden="true" className="w-7 h-7 text-[var(--positive)]" strokeWidth={2} />
+              </div>
+              <div>
+                <p className="text-base font-bold text-gray-900 dark:text-gray-100">
+                  {importedBatches.length} batch{importedBatches.length !== 1 ? 'es' : ''} imported
+                </p>
+                <p className="text-2xs text-gray-500 dark:text-gray-400 mt-1">
+                  {totalObl} obligation{totalObl !== 1 ? 's' : ''} created as <span className="font-semibold">{submitMode === 'direct' ? 'Pending' : 'Draft'}</span>
+                </p>
+              </div>
+              <div className="w-full max-h-32 overflow-y-auto rounded-lg border border-gray-200 dark:border-[var(--border)] divide-y divide-gray-100 dark:divide-gray-700">
+                {importedBatches.map((b, i) => (
+                  <div key={i} className="flex items-center justify-between px-3 py-1.5 text-left">
+                    <span className="text-2xs font-semibold text-gray-700 dark:text-gray-200">{b.counterpartyName}</span>
+                    <span className="text-2xs tabular-nums text-gray-500 dark:text-gray-400">{b.id}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
 
         {/* Footer */}
-        <div className="px-5 py-4 bg-gray-50 dark:bg-[var(--surface-3)] border-t border-gray-200 dark:border-[var(--border)] flex items-center justify-end gap-2.5">
-          {step === 'preview' && (
+        <div className="px-5 py-3 bg-gray-50 dark:bg-[var(--surface-3)] border-t border-gray-200 dark:border-[var(--border)] flex items-center justify-end gap-2.5">
+          {step !== 'upload' && step !== 'complete' && (
             <button
-              onClick={() => setStep('input')}
-              className="hover-item px-4 py-2 text-xs font-medium text-gray-700 dark:text-gray-300 bg-white dark:bg-[var(--surface-3)] border border-gray-300 dark:border-[var(--border)] rounded-full transition-colors mr-auto"
+              onClick={goBack}
+              className="hover-item px-4 py-1.5 text-xs font-medium text-gray-700 dark:text-gray-300 bg-white dark:bg-[var(--surface-3)] border border-gray-300 dark:border-[var(--border)] rounded-full transition-colors mr-auto"
             >
               ← Back
             </button>
           )}
-          <button onClick={onClose} className="hover-item px-4 py-2 text-xs font-medium text-gray-700 dark:text-gray-300 bg-white dark:bg-[var(--surface-3)] border border-gray-300 dark:border-[var(--border)] rounded-full transition-colors">
-            Cancel
-          </button>
-          {step === 'input' ? (
+          {step !== 'complete' && (
             <button
-              onClick={handleParse}
-              disabled={!raw.trim()}
-              className={`flex items-center gap-1.5 px-4 py-2 text-xs font-medium rounded-full transition-colors text-gray-900 bg-[#CDF698] ${raw.trim() ? 'hover:bg-[var(--color-200)]' : 'opacity-30 cursor-not-allowed'}`}
+              onClick={onClose}
+              className="hover-item px-4 py-1.5 text-xs font-medium text-gray-700 dark:text-gray-300 bg-white dark:bg-[var(--surface-3)] border border-gray-300 dark:border-[var(--border)] rounded-full transition-colors"
             >
-              <Upload aria-hidden="true" className="w-3 h-3" strokeWidth={2.5} />
-              Parse
+              Cancel
+            </button>
+          )}
+          {step === 'submit' ? (
+            <button
+              onClick={goNext}
+              className="flex items-center gap-1.5 px-4 py-1.5 text-xs font-medium rounded-full transition-colors text-gray-900 bg-[#CDF698] hover:bg-[var(--color-200)]"
+            >
+              <CheckCircle aria-hidden="true" className="w-3 h-3" strokeWidth={2.5} />
+              Import {n} batch{n !== 1 ? 'es' : ''}
+            </button>
+          ) : step === 'complete' ? (
+            <button
+              onClick={handleDone}
+              autoFocus
+              className="flex items-center gap-1.5 px-4 py-1.5 text-xs font-medium rounded-full transition-colors text-gray-900 bg-[#CDF698] hover:bg-[var(--color-200)]"
+            >
+              View imported batches
+              <ChevronRight aria-hidden="true" className="w-3 h-3" strokeWidth={2.5} />
             </button>
           ) : (
             <button
-              onClick={handleConfirm}
-              autoFocus
-              className="flex items-center gap-1.5 px-4 py-2 text-xs font-medium rounded-full transition-colors text-gray-900 bg-[#CDF698] hover:bg-[var(--color-200)]"
+              onClick={goNext}
+              disabled={!canGoNext}
+              className={`flex items-center gap-1.5 px-4 py-1.5 text-xs font-medium rounded-full transition-colors text-gray-900 bg-[#CDF698] ${canGoNext ? 'hover:bg-[var(--color-200)]' : 'opacity-30 cursor-not-allowed'}`}
             >
-              <CheckCircle aria-hidden="true" className="w-3 h-3" strokeWidth={2.5} />
-              Add {n} batch{n !== 1 ? 'es' : ''}
+              Continue
+              <ChevronRight aria-hidden="true" className="w-3 h-3" strokeWidth={2.5} />
             </button>
           )}
         </div>
       </div>
     </div>
-  );
-}
-
-// ── Create batch: constants ───────────────────────────────────────────────────
-
-const KNOWN_CPS = ['FalconX', 'Cumberland DRW', 'B2C2', 'Wintermute', 'Galaxy Digital', 'Jump Trading'];
-const KNOWN_ASSETS = ['BTC', 'ETH', 'USDC', 'USDT', 'SOL', 'BNB', 'XRP', 'ADA', 'MATIC', 'DAI'];
-const TIMEZONES = ['UTC', 'EST (UTC-5)', 'EDT (UTC-4)', 'PST (UTC-8)', 'CET (UTC+1)', 'JST (UTC+9)'];
-const REF_PRICES: Record<string, number> = {
-  BTC: 70000, ETH: 3000, SOL: 150, USDC: 1, USDT: 1, DAI: 1, BNB: 600,
-  XRP: 0.60, ADA: 0.45, MATIC: 0.70,
-};
-
-interface NewObligation {
-  direction: 'deliver' | 'receive';
-  asset: string;
-  amountAsset: number;
-  amountUsd: number;
-}
-
-// ── CreateBatchModal ──────────────────────────────────────────────────────────
-
-function CreateBatchModal({ onConfirm, onClose }: { onConfirm: (batch: Batch) => void; onClose: () => void }) {
-  const today = new Date().toISOString().split('T')[0];
-  const [cp, setCp] = useState('');
-  const [cpOpen, setCpOpen] = useState(false);
-  const [showAddCpModal, setShowAddCpModal] = useState(false);
-  const [localCps, setLocalCps] = useState([...KNOWN_CPS]);
-  const cpDropRef = useRef<HTMLDivElement>(null);
-  const [ref, setRef] = useState('');
-  const [cutoffDate, setCutoffDate] = useState(today);
-  const [cutoffTime, setCutoffTime] = useState('11:00');
-  const [tz, setTz] = useState('UTC');
-  const handleKey = (e: React.KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
-
-  useEffect(() => {
-    if (!cpOpen) return;
-    const handler = (e: MouseEvent) => {
-      if (cpDropRef.current && !cpDropRef.current.contains(e.target as Node)) {
-        setCpOpen(false);
-      }
-    };
-    document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
-  }, [cpOpen]);
-
-  const valid = cp.trim().length > 0 && cutoffDate.length > 0;
-
-  const handleCreate = () => {
-    if (!valid) return;
-    const id = ref.trim() ? ref.trim() : `BATCH-${Date.now().toString(36).toUpperCase().slice(-6)}`;
-    const cutoffStr = `${cutoffDate} ${cutoffTime}`;
-    const now = new Date();
-    const ts = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')} ${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`;
-    onConfirm({ id, counterpartyName: cp.trim(), cutoffTime: cutoffStr, status: 'Draft', totalUsd: 0, origin: 'created', deliverObligations: [], receiveObligations: [], activity: [{ id: `act-${Date.now()}`, timestamp: ts, type: 'created', description: 'Batch created', user: 'You' }] });
-  };
-
-  return (
-    <>
-    <div className="modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
-      <div
-        className="bg-white dark:bg-[var(--color-1)] rounded-lg shadow-xl w-full max-w-lg mx-4 border border-gray-200 dark:border-[var(--border)] flex flex-col max-h-[90vh]"
-        role="dialog" aria-modal="true" aria-labelledby="create-batch-title" onKeyDown={handleKey}
-      >
-        {/* Header */}
-        <div className="flex items-center justify-between px-5 py-4 border-b border-gray-200 dark:border-[var(--border)] flex-shrink-0 rounded-t-lg bg-white dark:bg-[var(--color-1)]">
-          <div className="flex items-center gap-2">
-            <div className="w-6 h-6 rounded bg-[var(--color-50)] dark:bg-[var(--color-950)]/20 flex items-center justify-center">
-              <Plus aria-hidden="true" className="w-3.5 h-3.5 text-[var(--color-700)] dark:text-[var(--color-300)]" strokeWidth={2.5} />
-            </div>
-            <span id="create-batch-title" className="text-sm font-semibold text-gray-900 dark:text-gray-100">New Batch</span>
-          </div>
-          <button onClick={onClose} className="text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 transition-colors rounded-full p-0.5" aria-label="Close">
-            <X aria-hidden="true" className="w-4 h-4" strokeWidth={2} />
-          </button>
-        </div>
-
-        {/* Counterparty — outside the scrollable body so the dropdown is never clipped */}
-        <div className="px-5 pt-4 pb-0 flex-shrink-0 bg-white dark:bg-[var(--color-1)]">
-          <label className="block text-2xs font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide mb-1">
-            Counterparty <span className="text-red-400">*</span>
-          </label>
-          <div className="relative" ref={cpDropRef}>
-            <button
-              type="button"
-              onClick={() => setCpOpen(v => !v)}
-              className={`w-full flex items-center gap-2 text-xs px-3 py-2 border rounded transition-colors bg-white dark:bg-[var(--surface-3)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[oklch(0.683_0.106_127.892_/_0.45)] ${cpOpen ? 'border-[oklch(0.683_0.106_127.892)] dark:border-[var(--color-500)]' : 'border-gray-300 dark:border-[var(--border)]'}`}
-            >
-              {cp ? (
-                <>
-                  <CounterpartyAvatar name={cp} size={18} />
-                  <span className="flex-1 text-left text-gray-900 dark:text-gray-100 font-medium">{cp}</span>
-                </>
-              ) : (
-                <span className="flex-1 text-left text-gray-400 dark:text-gray-500">Select a counterparty</span>
-              )}
-              <ChevronDown aria-hidden="true" className={`w-3.5 h-3.5 text-gray-400 flex-shrink-0 transition-transform duration-150 ${cpOpen ? 'rotate-180' : ''}`} strokeWidth={2} />
-            </button>
-
-            {cpOpen && (
-              <div className="absolute left-0 top-full mt-1 z-50 w-full bg-white dark:bg-[var(--color-1)] border border-gray-200 dark:border-[var(--border)] rounded-lg shadow-xl overflow-hidden dropdown-enter">
-                <div className="max-h-44 overflow-y-auto">
-                  {localCps.map(name => (
-                    <button
-                      key={name}
-                      type="button"
-                      onClick={() => { setCp(name); setCpOpen(false); }}
-                      className={`w-full flex items-center gap-2.5 px-3 py-2 text-xs transition-colors hover:bg-gray-50 dark:hover:bg-white/5 ${name === cp ? 'bg-[var(--color-50)] dark:bg-[var(--color-950)]/20' : ''}`}
-                    >
-                      <CounterpartyAvatar name={name} size={22} />
-                      <span className="flex-1 text-left text-gray-800 dark:text-gray-200">{name}</span>
-                      {name === cp && <Check aria-hidden="true" className="w-3 h-3 text-[var(--color-700)] dark:text-[var(--color-300)]" strokeWidth={2.5} />}
-                    </button>
-                  ))}
-                </div>
-                <div className="border-t border-gray-100 dark:border-[var(--border)] px-3 py-2.5">
-                  <button
-                    type="button"
-                    onClick={() => { setCpOpen(false); setShowAddCpModal(true); }}
-                    className="flex items-center gap-1.5 text-2xs font-medium text-gray-500 dark:text-gray-400 hover:text-[var(--color-700)] dark:hover:text-[var(--color-300)] transition-colors"
-                  >
-                    <Plus aria-hidden="true" className="w-3 h-3" strokeWidth={2.5} />
-                    Add new counterparty
-                  </button>
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* Body */}
-        <div className="flex-1 overflow-y-auto px-5 py-4 space-y-4">
-
-          {/* Reference / Batch ID */}
-          <div>
-            <label className="block text-2xs font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide mb-1">
-              Reference / Batch ID <span className="text-gray-400 dark:text-gray-500 normal-case font-normal">(optional)</span>
-            </label>
-            <input
-              type="text"
-              value={ref}
-              onChange={e => setRef(e.target.value)}
-              placeholder="e.g. BATCH-EXT-001 — leave blank to auto-generate"
-              autoComplete="off"
-              className="w-full text-xs px-3 py-2 border border-gray-300 dark:border-[var(--border)] rounded bg-white dark:bg-[var(--surface-3)] text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[oklch(0.683_0.106_127.892_/_0.45)] focus-visible:border-[oklch(0.683_0.106_127.892)] transition-colors font-mono"
-            />
-          </div>
-
-          {/* Cutoff date + time + timezone */}
-          <div>
-            <label className="block text-2xs font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide mb-1">
-              Cut-off Time <span className="text-red-400">*</span>
-            </label>
-            <div className="flex gap-2">
-              <input
-                type="date"
-                value={cutoffDate}
-                onChange={e => setCutoffDate(e.target.value)}
-                className="flex-1 text-xs px-3 py-2 border border-gray-300 dark:border-[var(--border)] rounded bg-white dark:bg-[var(--surface-3)] text-gray-900 dark:text-gray-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[oklch(0.683_0.106_127.892_/_0.45)] transition-colors"
-              />
-              <input
-                type="time"
-                value={cutoffTime}
-                onChange={e => setCutoffTime(e.target.value)}
-                className="w-28 text-xs px-3 py-2 border border-gray-300 dark:border-[var(--border)] rounded bg-white dark:bg-[var(--surface-3)] text-gray-900 dark:text-gray-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[oklch(0.683_0.106_127.892_/_0.45)] transition-colors font-mono"
-              />
-              <select
-                value={tz}
-                onChange={e => setTz(e.target.value)}
-                className="w-28 text-xs px-2 py-2 border border-gray-300 dark:border-[var(--border)] rounded bg-white dark:bg-[var(--surface-3)] text-gray-900 dark:text-gray-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[oklch(0.683_0.106_127.892_/_0.45)] transition-colors"
-              >
-                {TIMEZONES.map(t => <option key={t} value={t}>{t}</option>)}
-              </select>
-            </div>
-          </div>
-
-        </div>
-
-        {/* Footer */}
-        <div className="px-5 py-4 bg-gray-50 dark:bg-[var(--surface-3)] border-t border-gray-200 dark:border-[var(--border)] flex items-center justify-end gap-2.5 flex-shrink-0">
-          <p className="flex-1 text-2xs text-gray-400 dark:text-gray-500">Obligations can be added after the batch is created.</p>
-          <button
-            onClick={onClose}
-            className="hover-item px-4 py-2 text-xs font-medium text-gray-700 dark:text-gray-300 bg-white dark:bg-[var(--surface-3)] border border-gray-300 dark:border-[var(--border)] rounded-full transition-colors"
-          >
-            Cancel
-          </button>
-          <button
-            onClick={handleCreate}
-            disabled={!valid}
-            className={`px-4 py-2 text-xs font-medium rounded-full transition-colors ${valid ? 'text-gray-900 bg-[#CDF698] hover:bg-[var(--color-200)]' : 'text-gray-900 bg-[#CDF698] opacity-30 cursor-not-allowed'}`}
-          >
-            Create Batch
-          </button>
-        </div>
-      </div>
-    </div>
-    {showAddCpModal && (
-      <AddCounterpartyModal
-        onSave={(data) => {
-          const name = data.name.trim();
-          if (name) {
-            setLocalCps(prev => prev.includes(name) ? prev : [...prev, name]);
-            setCp(name);
-          }
-          setShowAddCpModal(false);
-        }}
-        onClose={() => setShowAddCpModal(false)}
-      />
-    )}
-    </>
   );
 }
 
 // ── Posted Total Overview ──────────────────────────────────────────────────────
 
-const ASCERTAINED_STATUSES = new Set<BatchStatus>(['Ascertained', 'Cleared']);
+const APPROVED_STATUSES = new Set<BatchStatus>(['Approved', 'Cleared']);
 
 function PostedTotalOverview({ batches }: { batches: Batch[] }) {
-  const ascertained = batches.filter((b) => ASCERTAINED_STATUSES.has(b.status));
+  const approved = batches.filter((b) => APPROVED_STATUSES.has(b.status));
 
   const assetMap = new Map<string, { deliver: number; receive: number }>();
   const cpMap = new Map<string, { deliver: number; receive: number }>();
   let totalDeliver = 0;
   let totalReceive = 0;
 
-  for (const batch of ascertained) {
+  for (const batch of approved) {
     const cp = batch.counterpartyName;
     if (!cpMap.has(cp)) cpMap.set(cp, { deliver: 0, receive: 0 });
     const cpData = cpMap.get(cp)!;
@@ -1749,7 +1969,7 @@ function PostedTotalOverview({ batches }: { batches: Batch[] }) {
       value: `${net >= 0 ? '+' : '−'}${fmtUsdFull(Math.abs(net))}`,
       color: net >= 0 ? 'text-[var(--positive)]' : 'text-[var(--negative)]',
     },
-    { label: 'Batches', value: String(ascertained.length), color: 'text-gray-900 dark:text-gray-100' },
+    { label: 'Batches', value: String(approved.length), color: 'text-gray-900 dark:text-gray-100' },
   ];
 
   const sortedAssets = [...assetMap.entries()].sort(
@@ -1765,7 +1985,7 @@ function PostedTotalOverview({ batches }: { batches: Batch[] }) {
       <div className="flex-shrink-0 bg-white dark:bg-[var(--color-2)] border-b border-gray-100 dark:border-[var(--border)] px-5 py-4">
         <h2 className="text-sm font-semibold text-gray-900 dark:text-gray-100">Posted Total Overview</h2>
         <p className="text-2xs text-gray-400 dark:text-gray-500 mt-0.5">
-          Summary across {ascertained.length} ascertained batch{ascertained.length !== 1 ? 'es' : ''}
+          Summary across {approved.length} approved batch{approved.length !== 1 ? 'es' : ''}
         </p>
       </div>
 
@@ -1774,19 +1994,19 @@ function PostedTotalOverview({ batches }: { batches: Batch[] }) {
         {kpis.map(({ label, value, color }) => (
           <div key={label} className="px-5 py-3.5">
             <div className="text-2xs text-gray-400 dark:text-gray-500 uppercase tracking-wide">{label}</div>
-            <div className={`text-sm font-bold tabular-nums mt-0.5 font-mono ${color}`}>{value}</div>
+            <div className={`text-sm font-bold tabular-nums mt-0.5 ${color}`}>{value}</div>
           </div>
         ))}
       </div>
 
-      {ascertained.length === 0 ? (
+      {approved.length === 0 ? (
         <div className="flex-1 flex flex-col items-center justify-center gap-2 text-gray-400 dark:text-gray-500">
-          <p className="text-sm">No ascertained batches yet</p>
+          <p className="text-sm">No approved batches yet</p>
         </div>
       ) : (
         <div className="flex-1 overflow-y-auto p-4 space-y-4">
           {/* By asset */}
-          <div className="rounded-xl overflow-hidden bg-white dark:bg-[var(--color-2)] border border-gray-100 dark:border-[var(--border)]">
+          <div className="rounded-xl overflow-hidden bg-white dark:bg-[var(--color-2)] shadow-sm dark:shadow-none dark:border dark:border-[var(--border)]">
             <div className="px-4 py-2.5 border-b border-gray-100 dark:border-[var(--border)]">
               <span className="text-xs font-semibold text-gray-700 dark:text-gray-200">By Asset</span>
             </div>
@@ -1810,9 +2030,9 @@ function PostedTotalOverview({ batches }: { batches: Batch[] }) {
                           <span className="font-medium text-gray-800 dark:text-gray-100">{asset}</span>
                         </div>
                       </td>
-                      <td className="text-right px-2 py-2.5 font-mono text-[var(--negative)]">{fmtUsdFull(deliver)}</td>
-                      <td className="text-right px-2 py-2.5 font-mono text-[var(--positive)]">{fmtUsdFull(receive)}</td>
-                      <td className={`text-right pr-4 py-2.5 font-mono font-semibold ${assetNet >= 0 ? 'text-[var(--positive)]' : 'text-[var(--negative)]'}`}>
+                      <td className="text-right px-2 py-2.5 text-[var(--negative)]">{fmtUsdFull(deliver)}</td>
+                      <td className="text-right px-2 py-2.5 text-[var(--positive)]">{fmtUsdFull(receive)}</td>
+                      <td className={`text-right pr-4 py-2.5 font-semibold ${assetNet >= 0 ? 'text-[var(--positive)]' : 'text-[var(--negative)]'}`}>
                         {assetNet >= 0 ? '+' : '−'}{fmtUsdFull(Math.abs(assetNet))}
                       </td>
                     </tr>
@@ -1823,7 +2043,7 @@ function PostedTotalOverview({ batches }: { batches: Batch[] }) {
           </div>
 
           {/* By counterparty */}
-          <div className="rounded-xl overflow-hidden bg-white dark:bg-[var(--color-2)] border border-gray-100 dark:border-[var(--border)]">
+          <div className="rounded-xl overflow-hidden bg-white dark:bg-[var(--color-2)] shadow-sm dark:shadow-none dark:border dark:border-[var(--border)]">
             <div className="px-4 py-2.5 border-b border-gray-100 dark:border-[var(--border)]">
               <span className="text-xs font-semibold text-gray-700 dark:text-gray-200">By Counterparty</span>
             </div>
@@ -1847,9 +2067,9 @@ function PostedTotalOverview({ batches }: { batches: Batch[] }) {
                           <span className="font-medium text-gray-800 dark:text-gray-100">{cp}</span>
                         </div>
                       </td>
-                      <td className="text-right px-2 py-2.5 font-mono text-[var(--negative)]">{fmtUsdFull(deliver)}</td>
-                      <td className="text-right px-2 py-2.5 font-mono text-[var(--positive)]">{fmtUsdFull(receive)}</td>
-                      <td className={`text-right pr-4 py-2.5 font-mono font-semibold ${cpNet >= 0 ? 'text-[var(--positive)]' : 'text-[var(--negative)]'}`}>
+                      <td className="text-right px-2 py-2.5 text-[var(--negative)]">{fmtUsdFull(deliver)}</td>
+                      <td className="text-right px-2 py-2.5 text-[var(--positive)]">{fmtUsdFull(receive)}</td>
+                      <td className={`text-right pr-4 py-2.5 font-semibold ${cpNet >= 0 ? 'text-[var(--positive)]' : 'text-[var(--negative)]'}`}>
                         {cpNet >= 0 ? '+' : '−'}{fmtUsdFull(Math.abs(cpNet))}
                       </td>
                     </tr>
@@ -1864,51 +2084,224 @@ function PostedTotalOverview({ batches }: { batches: Batch[] }) {
   );
 }
 
+// ── Batches Landing (default workspace) ───────────────────────────────────────
+
+interface BatchesLandingProps {
+  filteredBatches: Batch[];
+  onSelectBatch: (id: string) => void;
+}
+
+function BatchesLanding({ filteredBatches, onSelectBatch }: BatchesLandingProps) {
+  const draftCount     = filteredBatches.filter(b => b.status === 'Draft').length;
+  const pendingCount   = filteredBatches.filter(b => b.status === 'Pending').length;
+  const approvedCount  = filteredBatches.filter(b => b.status === 'Approved').length;
+
+  const totalDeliver = filteredBatches.reduce(
+    (s, b) => s + b.deliverObligations.reduce((ss, o) => ss + o.amountUsd, 0), 0
+  );
+  const totalReceive = filteredBatches.reduce(
+    (s, b) => s + b.receiveObligations.reduce((ss, o) => ss + o.amountUsd, 0), 0
+  );
+  const net = totalReceive - totalDeliver;
+
+  // Group by counterparty
+  const cpMap = new Map<string, { count: number; deliver: number; receive: number; ids: string[]; statuses: BatchStatus[] }>();
+  for (const batch of filteredBatches) {
+    const data = cpMap.get(batch.counterpartyName) ?? { count: 0, deliver: 0, receive: 0, ids: [], statuses: [] };
+    data.count += 1;
+    data.deliver += batch.deliverObligations.reduce((s, o) => s + o.amountUsd, 0);
+    data.receive += batch.receiveObligations.reduce((s, o) => s + o.amountUsd, 0);
+    data.ids.push(batch.id);
+    data.statuses.push(batch.status);
+    cpMap.set(batch.counterpartyName, data);
+  }
+  const sortedCps = [...cpMap.entries()].sort(
+    (a, b) => (b[1].deliver + b[1].receive) - (a[1].deliver + a[1].receive)
+  );
+
+  const today = new Date();
+  const dateLabel = today.toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric', year: 'numeric' });
+
+  if (filteredBatches.length === 0) {
+    return (
+      <div className="h-full flex flex-col items-center justify-center gap-3 text-gray-400 dark:text-gray-500">
+        <Calendar aria-hidden="true" className="w-10 h-10 opacity-40" strokeWidth={1.5} />
+        <p className="text-sm">No batches match the current filters</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="h-full overflow-y-auto px-4 py-4 space-y-4">
+      {/* Header */}
+      <div>
+        <h1 className="text-base font-bold text-gray-900 dark:text-gray-100">Today's batches</h1>
+        <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{dateLabel} · {filteredBatches.length} active</p>
+      </div>
+
+      {/* Status breakdown */}
+      <div className="grid grid-cols-3 gap-3">
+        {[
+          { label: 'Draft',    count: draftCount,    accent: 'text-gray-500 dark:text-gray-400' },
+          { label: 'Pending',  count: pendingCount,  accent: 'text-amber-600 dark:text-amber-400' },
+          { label: 'Approved', count: approvedCount, accent: 'text-[var(--color-700)] dark:text-[var(--color-300)]' },
+        ].map(({ label, count, accent }) => (
+          <div key={label} className="rounded-xl bg-white dark:bg-[var(--color-2)] shadow-md dark:shadow-[0_8px_24px_rgba(0,0,0,0.5)] px-4 py-3">
+            <p className={`text-2xs uppercase tracking-wide font-semibold ${accent}`}>{label}</p>
+            <p className="text-2xl font-bold tabular-nums mt-1 text-gray-900 dark:text-gray-100">{count}</p>
+            <p className="text-2xs text-gray-400 dark:text-gray-500 mt-0.5">batch{count !== 1 ? 'es' : ''}</p>
+          </div>
+        ))}
+      </div>
+
+      {/* Financial KPIs */}
+      <div className="grid grid-cols-3 gap-3">
+        <div className="rounded-xl bg-white dark:bg-[var(--color-2)] shadow-md dark:shadow-[0_8px_24px_rgba(0,0,0,0.5)] px-4 py-3">
+          <div className="flex items-center gap-1.5">
+            <ArrowUp aria-hidden="true" className="w-3.5 h-3.5 text-[var(--negative)]" strokeWidth={2} />
+            <p className="text-2xs uppercase tracking-wide font-semibold text-[var(--negative)]">To deliver</p>
+          </div>
+          <p className="text-base font-bold tabular-nums mt-1.5 text-gray-900 dark:text-gray-100">{fmtUsdFull(totalDeliver)}</p>
+        </div>
+        <div className="rounded-xl bg-white dark:bg-[var(--color-2)] shadow-md dark:shadow-[0_8px_24px_rgba(0,0,0,0.5)] px-4 py-3">
+          <div className="flex items-center gap-1.5">
+            <ArrowDown aria-hidden="true" className="w-3.5 h-3.5 text-[var(--positive)]" strokeWidth={2} />
+            <p className="text-2xs uppercase tracking-wide font-semibold text-[var(--positive)]">To receive</p>
+          </div>
+          <p className="text-base font-bold tabular-nums mt-1.5 text-gray-900 dark:text-gray-100">{fmtUsdFull(totalReceive)}</p>
+        </div>
+        <div className="rounded-xl bg-white dark:bg-[var(--color-2)] shadow-md dark:shadow-[0_8px_24px_rgba(0,0,0,0.5)] px-4 py-3">
+          <p className="text-2xs uppercase tracking-wide font-semibold text-gray-500 dark:text-gray-400">Net position</p>
+          <p className={`text-base font-bold tabular-nums mt-1.5 ${net >= 0 ? 'text-[var(--positive)]' : 'text-[var(--negative)]'}`}>
+            {net >= 0 ? '+' : '−'}{fmtUsdFull(Math.abs(net))}
+          </p>
+        </div>
+      </div>
+
+      {/* By counterparty */}
+      <div className="rounded-2xl overflow-hidden bg-white dark:bg-[var(--color-2)] shadow-md">
+        <div className="px-4 py-2.5">
+          <span className="text-xs font-semibold text-gray-700 dark:text-gray-200">By counterparty</span>
+        </div>
+        <table className="w-full text-xs px-3">
+          <thead>
+            <tr className="bg-gray-50 dark:bg-[var(--color-1)] text-gray-500 dark:text-gray-400 border-b border-gray-100 dark:border-[var(--border)] text-[10px] uppercase tracking-wide">
+              <th className="text-left pl-4 pr-2 py-2 font-medium">Counterparty</th>
+              <th className="text-right px-2 py-2 font-medium">Batches</th>
+              <th className="text-right px-2 py-2 font-medium">Deliver</th>
+              <th className="text-right px-2 py-2 font-medium">Receive</th>
+              <th className="text-right pr-4 py-2 font-medium">Net</th>
+            </tr>
+          </thead>
+          <tbody>
+            {sortedCps.map(([cp, { count, deliver, receive, ids }]) => {
+              const cpNet = receive - deliver;
+              return (
+                <tr
+                  key={cp}
+                  onClick={() => ids[0] && onSelectBatch(ids[0])}
+                  className="cursor-pointer hover:bg-gray-50 dark:hover:bg-[var(--surface-3)] border-b border-gray-50 dark:border-[var(--border)] last:border-b-0 transition-colors"
+                >
+                  <td className="pl-4 pr-2 py-2.5">
+                    <div className="flex items-center gap-2">
+                      <CounterpartyAvatar name={cp} size={20} />
+                      <span className="font-medium text-gray-800 dark:text-gray-100">{cp}</span>
+                    </div>
+                  </td>
+                  <td className="text-right px-2 py-2.5 tabular-nums text-gray-600 dark:text-gray-300">{count}</td>
+                  <td className="text-right px-2 py-2.5 tabular-nums text-[var(--negative)]">{deliver > 0 ? fmtUsdFull(deliver) : '—'}</td>
+                  <td className="text-right px-2 py-2.5 tabular-nums text-[var(--positive)]">{receive > 0 ? fmtUsdFull(receive) : '—'}</td>
+                  <td className={`text-right pr-4 py-2.5 tabular-nums font-semibold ${cpNet >= 0 ? 'text-[var(--positive)]' : 'text-[var(--negative)]'}`}>
+                    {cpNet >= 0 ? '+' : '−'}{fmtUsdFull(Math.abs(cpNet))}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 // ── Main BatchesView ───────────────────────────────────────────────────────────
+
+const FILTER_KEY = 'cycles-prime:batch-filters';
+
+function loadSavedFilters(): { datePreset: string; statusFilter: string[]; cpFilter: string[] } | null {
+  try {
+    const raw = localStorage.getItem(FILTER_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch { return null; }
+}
+
+function saveSavedFilters(data: { datePreset: string; statusFilter: string[]; cpFilter: string[] }) {
+  try { localStorage.setItem(FILTER_KEY, JSON.stringify(data)); } catch {}
+}
 
 interface BatchesViewProps {
   batches: Batch[];
   onBatchesChange: (batches: Batch[]) => void;
   initialBatchId?: string;
+  initialCpFilter?: string;
 }
 
-export default function BatchesView({ batches, onBatchesChange, initialBatchId }: BatchesViewProps) {
-  const [selectedId, setSelectedId] = useState<string>(initialBatchId ?? batches[0]?.id ?? '');
+export default function BatchesView({ batches, onBatchesChange, initialBatchId, initialCpFilter }: BatchesViewProps) {
+  const [selectedId, setSelectedId] = useState<string>(initialBatchId ?? '');
   const [focusedIndex, setFocusedIndex] = useState<number>(0);
+  const [batchesMode, setBatchesMode] = useState<'dashboard' | 'detail'>(() => initialBatchId ? 'detail' : 'dashboard');
   const [showImport, setShowImport] = useState(false);
-  const [showCreate, setShowCreate] = useState(false);
-  type DatePreset = 'all' | '24h' | '3d' | '7d' | '30d' | 'custom';
-  const [datePreset, setDatePreset] = useState<DatePreset>('all');
+  const [showAddMenu, setShowAddMenu]         = useState(false);
+  const [showNewBatchForm, setShowNewBatchForm] = useState(false);
+  const [newBatchCP, setNewBatchCP]           = useState('');
+  const [newBatchCutoff, setNewBatchCutoff]   = useState('');
+  const [newBatchCPSearch, setNewBatchCPSearch] = useState('');
+  const addMenuRef = useRef<HTMLDivElement>(null);
+  const newBatchFormRef = useRef<HTMLDivElement>(null);
+  type DatePreset = 'all' | 'today' | '24h' | '3d' | '7d' | '30d' | '3m' | 'custom';
+  const [datePreset, setDatePreset] = useState<DatePreset>(
+    () => (loadSavedFilters()?.datePreset as DatePreset) ?? 'today'
+  );
   const [customFrom, setCustomFrom] = useState('');
   const [customTo, setCustomTo] = useState('');
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [showOverview, setShowOverview] = useState(false);
-  const [showAddMenu, setShowAddMenu] = useState(false);
   // Status filter — empty set means "all active statuses"
   const ARCHIVED_STATUSES = new Set<BatchStatus>(['Revoked', 'Deleted', 'Rejected']);
-  const ACTIVE_STATUSES: BatchStatus[] = ['Draft', 'Pending', 'Ascertained', 'Cleared', 'Cancelled'];
-  const [statusFilter, setStatusFilter] = useState<Set<BatchStatus>>(new Set());
+  const ACTIVE_STATUSES: BatchStatus[] = ['Draft', 'Pending', 'Approved', 'Cleared', 'Cancelled'];
+  const [statusFilter, setStatusFilter] = useState<Set<BatchStatus>>(
+    () => new Set((loadSavedFilters()?.statusFilter as BatchStatus[]) ?? ['Draft', 'Pending', 'Approved'])
+  );
   const [showArchived, setShowArchived] = useState(false);
   const [showStatusFilter, setShowStatusFilter] = useState(false);
   const listRef = useRef<HTMLDivElement>(null);
-  const addMenuRef = useRef<HTMLDivElement>(null);
   const datePickerRef = useRef<HTMLDivElement>(null);
   const statusFilterRef = useRef<HTMLDivElement>(null);
+  const [cpFilter, setCpFilter] = useState<Set<string>>(
+    () => initialCpFilter ? new Set([initialCpFilter]) : new Set((loadSavedFilters()?.cpFilter as string[]) ?? [])
+  );
+  const [showCpFilter, setShowCpFilter] = useState(false);
+  const [cpSearch, setCpSearch] = useState('');
+  const cpFilterRef = useRef<HTMLDivElement>(null);
+  const [listSearch, setListSearch] = useState('');
+  type BatchSortCol = 'id' | 'counterparty' | 'status' | 'cutoff' | 'deliver' | 'receive' | 'net';
+  const [batchSortCol, setBatchSortCol] = useState<BatchSortCol>('cutoff');
+  const [batchSortDir, setBatchSortDir] = useState<'asc' | 'desc'>('desc');
+  const toggleBatchSort = (col: BatchSortCol) => {
+    if (batchSortCol === col) setBatchSortDir(d => d === 'asc' ? 'desc' : 'asc');
+    else { setBatchSortCol(col); setBatchSortDir('asc'); }
+  };
 
   useEffect(() => {
-    if (initialBatchId) setSelectedId(initialBatchId);
+    if (initialBatchId) {
+      setSelectedId(initialBatchId);
+      setBatchesMode('detail');
+    }
   }, [initialBatchId]);
 
   useEffect(() => {
-    if (!showAddMenu) return;
-    const handler = (e: MouseEvent) => {
-      if (addMenuRef.current && !addMenuRef.current.contains(e.target as Node)) {
-        setShowAddMenu(false);
-      }
-    };
-    document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
-  }, [showAddMenu]);
+    if (initialCpFilter) setCpFilter(new Set([initialCpFilter]));
+  }, [initialCpFilter]);
 
   useEffect(() => {
     if (!showDatePicker) return;
@@ -1932,17 +2325,69 @@ export default function BatchesView({ batches, onBatchesChange, initialBatchId }
     return () => document.removeEventListener('mousedown', handler);
   }, [showStatusFilter]);
 
+  useEffect(() => {
+    if (!showCpFilter) return;
+    const handler = (e: MouseEvent) => {
+      if (cpFilterRef.current && !cpFilterRef.current.contains(e.target as Node)) {
+        setShowCpFilter(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [showCpFilter]);
+
+  useEffect(() => {
+    if (!showAddMenu) return;
+    const handler = (e: MouseEvent) => {
+      if (addMenuRef.current && !addMenuRef.current.contains(e.target as Node)) {
+        setShowAddMenu(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [showAddMenu]);
+
+  useEffect(() => {
+    if (!showNewBatchForm) return;
+    const handler = (e: MouseEvent) => {
+      if (newBatchFormRef.current && !newBatchFormRef.current.contains(e.target as Node)) {
+        setShowNewBatchForm(false);
+        setNewBatchCP('');
+        setNewBatchCutoff('');
+        setNewBatchCPSearch('');
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [showNewBatchForm]);
+
+  useEffect(() => {
+    saveSavedFilters({ datePreset, statusFilter: Array.from(statusFilter), cpFilter: Array.from(cpFilter) });
+  }, [datePreset, statusFilter, cpFilter]);
+
+  const allCounterparties = Array.from(new Set(batches.map(b => b.counterpartyName))).sort();
+
   const filteredBatches = (() => {
     let result = batches;
     // Archive filter — hide Revoked/Deleted/Rejected unless opted in
     if (!showArchived) result = result.filter(b => !ARCHIVED_STATUSES.has(b.status));
     // Status filter — empty = all
     if (statusFilter.size > 0) result = result.filter(b => statusFilter.has(b.status));
+    if (cpFilter.size > 0) result = result.filter(b => cpFilter.has(b.counterpartyName));
     // Date filter
+    if (datePreset === 'today') {
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const tomorrow = new Date(today.getTime() + 24 * 60 * 60 * 1000);
+      return result.filter(b => {
+        const t = new Date(b.cutoffTime);
+        return t >= today && t < tomorrow;
+      });
+    }
     if (datePreset === 'all') return result;
     const now = new Date();
     const msPerDay = 24 * 60 * 60 * 1000;
-    const daysMap: Partial<Record<DatePreset, number>> = { '24h': 1, '3d': 3, '7d': 7, '30d': 30 };
+    const daysMap: Partial<Record<DatePreset, number>> = { '24h': 1, '3d': 3, '7d': 7, '30d': 30, '3m': 90 };
     if (datePreset in daysMap) {
       const from = new Date(now.getTime() - (daysMap[datePreset]! * msPerDay));
       return result.filter(b => new Date(b.cutoffTime) >= from);
@@ -1958,19 +2403,86 @@ export default function BatchesView({ batches, onBatchesChange, initialBatchId }
     return result;
   })();
 
+  const detailFilteredBatches = listSearch.trim()
+    ? filteredBatches.filter(b =>
+        b.counterpartyName.toLowerCase().includes(listSearch.toLowerCase()) ||
+        b.id.toLowerCase().includes(listSearch.toLowerCase())
+      )
+    : filteredBatches;
+
+  const sortedBatchTable = [...filteredBatches].sort((a, b) => {
+    const aD = a.deliverObligations.reduce((s, o) => s + o.amountUsd, 0);
+    const bD = b.deliverObligations.reduce((s, o) => s + o.amountUsd, 0);
+    const aR = a.receiveObligations.reduce((s, o) => s + o.amountUsd, 0);
+    const bR = b.receiveObligations.reduce((s, o) => s + o.amountUsd, 0);
+    let cmp = 0;
+    switch (batchSortCol) {
+      case 'id':           cmp = a.id.localeCompare(b.id); break;
+      case 'counterparty': cmp = a.counterpartyName.localeCompare(b.counterpartyName); break;
+      case 'status':       cmp = a.status.localeCompare(b.status); break;
+      case 'cutoff':       cmp = new Date(a.cutoffTime).getTime() - new Date(b.cutoffTime).getTime(); break;
+      case 'deliver':      cmp = aD - bD; break;
+      case 'receive':      cmp = aR - bR; break;
+      case 'net':          cmp = (aR - aD) - (bR - bD); break;
+    }
+    return batchSortDir === 'asc' ? cmp : -cmp;
+  });
+
+  const sortTh = (col: BatchSortCol, label: string, className: string) => {
+    const active = batchSortCol === col;
+    return (
+      <th
+        className={`cursor-pointer select-none ${active ? 'text-gray-700 dark:text-gray-200' : ''} hover:text-gray-700 dark:hover:text-gray-200 transition-colors font-medium ${className}`}
+        onClick={() => toggleBatchSort(col)}
+      >
+        <span className="inline-flex items-center gap-1">
+          {label}
+          <span className={active ? 'opacity-80' : 'opacity-25'}>
+            {active && batchSortDir === 'asc' ? <ArrowUp size={9} /> : <ArrowDown size={9} />}
+          </span>
+        </span>
+      </th>
+    );
+  };
+
   const handleImportConfirm = (newBatches: Batch[]) => {
     onBatchesChange([...batches, ...newBatches]);
     setSelectedId(newBatches[0].id);
     setFocusedIndex(batches.length);
     setShowImport(false);
+    setBatchesMode('detail');
   };
 
-  const handleCreateConfirm = (newBatch: Batch) => {
+  const createBlankBatch = () => {
+    if (!newBatchCP.trim()) return;
+    const id = 'batch-' + Date.now().toString(36);
+    const newBatch: Batch = {
+      id,
+      counterpartyName: newBatchCP.trim(),
+      cutoffTime: newBatchCutoff || new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+      status: 'Draft',
+      totalUsd: 0,
+      origin: 'created',
+      deliverObligations: [],
+      receiveObligations: [],
+      activity: [{
+        id: id + '-created',
+        timestamp: new Date().toISOString(),
+        type: 'created',
+        description: 'Batch created manually',
+        user: 'You',
+      }],
+    };
     onBatchesChange([newBatch, ...batches]);
     setSelectedId(newBatch.id);
-    setDatePreset('all');
     setFocusedIndex(0);
-    setShowCreate(false);
+    setShowNewBatchForm(false);
+    setShowAddMenu(false);
+    setNewBatchCP('');
+    setNewBatchCutoff('');
+    setNewBatchCPSearch('');
+    setShowOverview(false);
+    setBatchesMode('detail');
   };
 
   // Next scheduled cycle countdown
@@ -1984,340 +2496,980 @@ export default function BatchesView({ batches, onBatchesChange, initialBatchId }
     return () => clearInterval(id);
   }, [nextCycle]);
 
-  const selectedBatch = filteredBatches.find((b) => b.id === selectedId) ?? filteredBatches[0];
+  const selectedBatch = selectedId ? filteredBatches.find((b) => b.id === selectedId) : undefined;
 
   const handleKeyDown = useCallback(
     (e: KeyboardEvent<HTMLDivElement>) => {
       if (e.key === 'ArrowDown') {
         e.preventDefault();
-        const next = Math.min(focusedIndex + 1, filteredBatches.length - 1);
+        const next = Math.min(focusedIndex + 1, detailFilteredBatches.length - 1);
         setFocusedIndex(next);
-        if (filteredBatches[next]) setSelectedId(filteredBatches[next].id);
+        if (detailFilteredBatches[next]) setSelectedId(detailFilteredBatches[next].id);
       } else if (e.key === 'ArrowUp') {
         e.preventDefault();
         const prev = Math.max(focusedIndex - 1, 0);
         setFocusedIndex(prev);
-        if (filteredBatches[prev]) setSelectedId(filteredBatches[prev].id);
+        if (detailFilteredBatches[prev]) setSelectedId(detailFilteredBatches[prev].id);
       } else if (e.key === 'Enter' || e.key === ' ') {
-        if (filteredBatches[focusedIndex]) setSelectedId(filteredBatches[focusedIndex].id);
+        if (detailFilteredBatches[focusedIndex]) setSelectedId(detailFilteredBatches[focusedIndex].id);
       }
     },
-    [filteredBatches, focusedIndex]
+    [detailFilteredBatches, focusedIndex]
   );
 
   const handleBatchUpdate = (updated: Batch) => {
     onBatchesChange(batches.map((b) => (b.id === updated.id ? updated : b)));
   };
 
-  return (
-    <div className="flex h-full overflow-hidden">
-      {/* ── LEFT PANEL: batch list (30%) ─────────────────────────────────── */}
-      <div
-        className="w-[28%] min-w-[260px] max-w-[320px] flex flex-col border-r border-gray-200 dark:border-[var(--border)] bg-white dark:bg-[var(--color-1)]"
-        style={{ flexShrink: 0 }}
-      >
-        <div className="px-4 py-5 min-h-[88px] flex flex-col justify-center border-b border-gray-200 dark:border-[var(--border)]">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase tracking-wide">
-              Batches <span className="inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full text-[10px] font-bold bg-[var(--surface-3)] text-gray-400 dark:text-gray-400 ml-1 tabular-nums leading-none">{batches.length}</span>
-            </span>
-            <div className="relative" ref={addMenuRef}>
-              <button
-                onClick={() => setShowAddMenu(v => !v)}
-                className="flex items-center gap-1 text-2xs font-medium text-gray-900 bg-[#CDF698] hover:bg-[var(--color-200)] px-2.5 py-1 rounded-full transition-colors"
-              >
-                <Plus aria-hidden="true" className="w-3 h-3" strokeWidth={2.5} />
-                Add
-                <ChevronDown aria-hidden="true" className={`w-3 h-3 transition-transform duration-150 ${showAddMenu ? 'rotate-180' : ''}`} strokeWidth={2} />
-              </button>
-              {showAddMenu && (
-                <div className="absolute right-0 top-full mt-1 w-40 bg-white dark:bg-[var(--color-2)] border border-gray-200 dark:border-[var(--border)] rounded-lg shadow-lg overflow-hidden z-50">
-                  <button
-                    onClick={() => { setShowCreate(true); setShowAddMenu(false); }}
-                    className="w-full flex items-center gap-2 px-3 py-2.5 text-xs text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-[var(--surface-2)] transition-colors text-left"
-                  >
-                    <Plus aria-hidden="true" className="w-3.5 h-3.5 text-gray-400 dark:text-gray-500 flex-shrink-0" strokeWidth={2} />
-                    New batch
-                  </button>
-                  <button
-                    onClick={() => { setShowImport(true); setShowAddMenu(false); }}
-                    className="w-full flex items-center gap-2 px-3 py-2.5 text-xs text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-[var(--surface-2)] transition-colors text-left border-t border-gray-100 dark:border-[var(--border)]"
-                  >
-                    <Upload aria-hidden="true" className="w-3.5 h-3.5 text-gray-400 dark:text-gray-500 flex-shrink-0" strokeWidth={2} />
-                    Import CSV
-                  </button>
-                </div>
-              )}
+  const goToDashboard = () => {
+    setSelectedId('');
+    setFocusedIndex(-1);
+    setBatchesMode('dashboard');
+  };
+
+  const openBatchDetail = (id: string) => {
+    const idx = filteredBatches.findIndex(b => b.id === id);
+    setSelectedId(id);
+    setFocusedIndex(idx >= 0 ? idx : 0);
+    setBatchesMode('detail');
+  };
+
+  // ── Dashboard computed values ──────────────────────────────────────────────────
+  const draftCount    = filteredBatches.filter(b => b.status === 'Draft').length;
+  const pendingCount  = filteredBatches.filter(b => b.status === 'Pending').length;
+  const approvedCount = filteredBatches.filter(b => b.status === 'Approved').length;
+  const totalDeliver  = filteredBatches.reduce(
+    (s, b) => s + b.deliverObligations.reduce((ss, o) => ss + o.amountUsd, 0), 0
+  );
+  const totalReceive  = filteredBatches.reduce(
+    (s, b) => s + b.receiveObligations.reduce((ss, o) => ss + o.amountUsd, 0), 0
+  );
+  const dashNet = totalReceive - totalDeliver;
+
+  const isDateFiltered = datePreset !== 'all';
+  const isStatusFiltered = statusFilter.size > 0 || showArchived;
+  const isCpFiltered = cpFilter.size > 0;
+  const isAnyFiltered = isDateFiltered || isStatusFiltered || isCpFiltered;
+  const PRESETS_DASH: { label: string; value: DatePreset }[] = [
+    { label: 'Today',    value: 'today' },
+    { label: 'All time', value: 'all'   },
+    { label: '24h',      value: '24h'   },
+    { label: '3 days',   value: '3d'    },
+    { label: '7 days',   value: '7d'    },
+    { label: '30 days',  value: '30d'   },
+    { label: '3 months', value: '3m'    },
+  ];
+  const fmtShortDate = (iso: string) => new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  const activeDateLabel = datePreset === 'today' ? 'Today'
+    : datePreset === 'custom'
+      ? (customFrom || customTo
+          ? [customFrom && fmtShortDate(customFrom), customTo && fmtShortDate(customTo)].filter(Boolean).join(' – ')
+          : 'Custom')
+      : (PRESETS_DASH.find(p => p.value === datePreset)?.label ?? 'All time');
+
+  // ── Dashboard mode — early return ──────────────────────────────────────────────
+  if (batchesMode === 'dashboard') {
+    return (
+      <>
+        <div className="flex flex-col h-full overflow-hidden bg-gray-50 dark:bg-[var(--color-1)]">
+
+          {/* ── Header ──────────────────────────────────────────────────────── */}
+          <div className="flex-shrink-0 flex items-center justify-between px-5 py-3.5 bg-white dark:bg-black border-b border-gray-200 dark:border-[var(--border)]">
+            <div>
+              <h1 className="text-sm font-bold text-gray-900 dark:text-gray-100">Batches</h1>
+              <p className="text-2xs text-gray-400 dark:text-gray-500 mt-0.5">
+                {new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric', year: 'numeric' })}
+                {' · '}{filteredBatches.length} batch{filteredBatches.length !== 1 ? 'es' : ''}
+              </p>
             </div>
-          </div>
-          {countdown && (
-            <button
-              onClick={() => window.dispatchEvent(new CustomEvent('navigate-tab', { detail: 'cycles' }))}
-              className="mt-1 flex items-center gap-1 text-2xs text-amber-600 dark:text-amber-400 hover:text-amber-700 dark:hover:text-amber-300 transition-colors"
-            >
-              <NumberFlowGroup>
-                <span className="font-mono tabular-nums flex items-center" style={{ fontVariantNumeric: 'tabular-nums' }}>
-                  <NumberFlow trend={-1} value={parseInt(countdown.hh)} format={{ minimumIntegerDigits: 2 }} />
-                  <span className="mx-[1px] opacity-60">:</span>
-                  <NumberFlow trend={-1} value={parseInt(countdown.mm)} format={{ minimumIntegerDigits: 2 }} digits={{ 1: { max: 5 } }} />
-                  <span className="mx-[1px] opacity-60">:</span>
-                  <NumberFlow trend={-1} value={parseInt(countdown.ss)} format={{ minimumIntegerDigits: 2 }} digits={{ 1: { max: 5 } }} />
-                </span>
-              </NumberFlowGroup>
-              <span className="text-gray-400 dark:text-gray-500">· next cycle →</span>
-            </button>
-          )}
-        </div>
-
-        {/* Date + Status filters — shared container, single bottom border */}
-        {(() => {
-          const PRESETS: { label: string; value: DatePreset }[] = [
-            { label: 'All time',    value: 'all'  },
-            { label: 'Last 24h',   value: '24h'  },
-            { label: 'Last 3 days', value: '3d'  },
-            { label: 'Last 7 days', value: '7d'  },
-            { label: 'Last 30 days', value: '30d' },
-          ];
-          const fmtShort = (iso: string) => new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-          const activeLabel = datePreset === 'custom'
-            ? (customFrom || customTo ? [customFrom && fmtShort(customFrom), customTo && fmtShort(customTo)].filter(Boolean).join(' – ') : 'Custom range')
-            : (PRESETS.find(p => p.value === datePreset)?.label ?? 'All time');
-          const isFiltered = datePreset !== 'all';
-          const activeFilter = statusFilter.size > 0 || showArchived;
-          const toggleStatus = (s: BatchStatus) => {
-            setStatusFilter(prev => {
-              const next = new Set(prev);
-              if (next.has(s)) next.delete(s); else next.add(s);
-              return next;
-            });
-            setFocusedIndex(0);
-          };
-          return (
-            <div className="px-3 py-2 border-b border-gray-100 dark:border-[var(--border)] space-y-1.5">
-              {/* Date filter */}
-              <div className="relative" ref={datePickerRef}>
+            <div className="flex items-center gap-3">
+              {countdown && (
                 <button
-                  onClick={() => setShowDatePicker(v => !v)}
-                  className={`w-full flex items-center gap-1.5 text-2xs px-2.5 py-1.5 rounded-lg border transition-colors ${
-                    isFiltered
-                      ? 'bg-[var(--color-50)] dark:bg-[var(--color-950)]/20 border-[var(--color-300)] dark:border-[var(--color-700)] text-[var(--color-700)] dark:text-[var(--color-300)]'
-                      : 'bg-white dark:bg-[var(--color-1)] border-gray-200 dark:border-[var(--border)] text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-[var(--surface-3)]'
-                  }`}
+                  onClick={() => window.dispatchEvent(new CustomEvent('navigate-tab', { detail: 'cycles' }))}
+                  className="flex items-center gap-1 text-2xs text-amber-600 dark:text-amber-400 hover:text-amber-700 dark:hover:text-amber-300 transition-colors"
                 >
-                  <Calendar aria-hidden="true" className="w-3 h-3 flex-shrink-0" strokeWidth={2} />
-                  <span className="flex-1 text-left font-medium">{activeLabel}</span>
-                  {isFiltered ? (
-                    <button
-                      aria-label="Clear date filter"
-                      onClick={e => { e.stopPropagation(); setDatePreset('all'); setCustomFrom(''); setCustomTo(''); setFocusedIndex(0); }}
-                      className="flex-shrink-0 opacity-60 hover:opacity-100 transition-opacity"
-                    >
-                      <X aria-hidden="true" className="w-3 h-3" strokeWidth={2} />
-                    </button>
-                  ) : (
-                    <ChevronDown aria-hidden="true" className={`w-3 h-3 flex-shrink-0 transition-transform duration-150 ${showDatePicker ? 'rotate-180' : ''}`} strokeWidth={2} />
-                  )}
+                  <NumberFlowGroup>
+                    <span className="tabular-nums flex items-center" style={{ fontVariantNumeric: 'tabular-nums' }}>
+                      <NumberFlow trend={-1} value={parseInt(countdown.hh)} format={{ minimumIntegerDigits: 2 }} />
+                      <span className="mx-[1px] opacity-60">:</span>
+                      <NumberFlow trend={-1} value={parseInt(countdown.mm)} format={{ minimumIntegerDigits: 2 }} digits={{ 1: { max: 5 } }} />
+                    </span>
+                  </NumberFlowGroup>
+                  <span className="text-gray-400 dark:text-gray-500">· next cycle →</span>
                 </button>
-
-                {showDatePicker && (
-                  <div className="absolute left-0 right-0 top-full mt-1 bg-white dark:bg-[var(--color-2)] border border-gray-200 dark:border-[var(--border)] rounded-xl shadow-xl overflow-hidden z-40 dropdown-enter">
-                    <div className="p-3">
-                      <p className="text-[10px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wide mb-2">Quick select</p>
-                      <div className="flex flex-wrap gap-1.5">
-                        {PRESETS.map(({ label, value }) => (
-                          <button
-                            key={value}
-                            onClick={() => { setDatePreset(value); setFocusedIndex(0); setShowDatePicker(false); }}
-                            className={`text-2xs font-medium px-2.5 py-1 rounded-full border transition-colors ${
-                              datePreset === value
-                                ? 'bg-[var(--color-50)] dark:bg-[var(--color-950)]/30 text-[var(--color-700)] dark:text-[var(--color-300)] border-[var(--color-300)] dark:border-[var(--color-700)]'
-                                : 'border-gray-200 dark:border-[var(--border)] text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-[var(--surface-3)]'
-                            }`}
-                          >
-                            {label}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                    <div className="px-3 pb-3 border-t border-gray-100 dark:border-[var(--border)] pt-3">
-                      <p className="text-[10px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wide mb-2">Custom range</p>
-                      <div className="grid grid-cols-2 gap-2">
-                        <div>
-                          <label className="text-[10px] text-gray-400 dark:text-gray-500 mb-1 block">From</label>
-                          <input
-                            type="date"
-                            value={customFrom}
-                            onChange={e => { setCustomFrom(e.target.value); setDatePreset('custom'); setFocusedIndex(0); }}
-                            className="w-full text-2xs bg-gray-50 dark:bg-[var(--surface-3)] border border-gray-200 dark:border-[var(--border)] rounded-md px-2 py-1 text-gray-700 dark:text-gray-200 focus:outline-none focus:ring-1 focus:ring-[var(--color-700)] dark:focus:ring-[var(--color-500)]"
-                          />
-                        </div>
-                        <div>
-                          <label className="text-[10px] text-gray-400 dark:text-gray-500 mb-1 block">To</label>
-                          <input
-                            type="date"
-                            value={customTo}
-                            onChange={e => { setCustomTo(e.target.value); setDatePreset('custom'); setFocusedIndex(0); }}
-                            className="w-full text-2xs bg-gray-50 dark:bg-[var(--surface-3)] border border-gray-200 dark:border-[var(--border)] rounded-md px-2 py-1 text-gray-700 dark:text-gray-200 focus:outline-none focus:ring-1 focus:ring-[var(--color-700)] dark:focus:ring-[var(--color-500)]"
-                          />
-                        </div>
-                      </div>
-                    </div>
+              )}
+              <div className="relative" ref={addMenuRef}>
+                <button
+                  onClick={() => { setShowAddMenu(v => !v); setShowNewBatchForm(false); }}
+                  className="flex items-center gap-1 text-2xs font-medium text-gray-900 bg-[#CDF698] hover:bg-[var(--color-200)] px-2.5 py-1 rounded-full transition-colors"
+                >
+                  <Plus aria-hidden="true" className="w-3 h-3" strokeWidth={2.5} />
+                  Add batch
+                  <ChevronDown aria-hidden="true" className={`w-3 h-3 transition-transform duration-150 ${showAddMenu ? 'rotate-180' : ''}`} strokeWidth={2} />
+                </button>
+                {showAddMenu && !showNewBatchForm && (
+                  <div className="absolute right-0 top-full mt-1 bg-white dark:bg-[var(--color-2)] border border-gray-200 dark:border-[var(--border)] rounded-xl shadow-xl overflow-hidden z-40 dropdown-enter min-w-[160px]">
+                    <button
+                      onClick={() => { setShowNewBatchForm(true); setShowAddMenu(false); }}
+                      className="w-full flex items-center gap-2 px-3 py-2 text-2xs hover-item transition-colors text-left text-gray-700 dark:text-gray-200"
+                    >
+                      <FileText aria-hidden="true" className="w-3 h-3 text-gray-400" strokeWidth={2} />
+                      New blank batch
+                    </button>
+                    <button
+                      onClick={() => { setShowImport(true); setShowAddMenu(false); }}
+                      className="w-full flex items-center gap-2 px-3 py-2 text-2xs hover-item transition-colors text-left text-gray-700 dark:text-gray-200"
+                    >
+                      <Upload aria-hidden="true" className="w-3 h-3 text-gray-400" strokeWidth={2} />
+                      Import CSV
+                    </button>
                   </div>
                 )}
-              </div>
-
-              {/* Status filter */}
-              <div className="relative" ref={statusFilterRef}>
-                <button
-                  onClick={() => setShowStatusFilter(v => !v)}
-                  className={`w-full flex items-center gap-1.5 text-2xs px-2.5 py-1.5 rounded-lg border transition-colors ${
-                    activeFilter
-                      ? 'bg-[var(--color-50)] dark:bg-[var(--color-950)]/20 border-[var(--color-300)] dark:border-[var(--color-700)] text-[var(--color-700)] dark:text-[var(--color-300)]'
-                      : 'bg-white dark:bg-[var(--color-1)] border-gray-200 dark:border-[var(--border)] text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-[var(--surface-3)]'
-                  }`}
-                >
-                  <Filter aria-hidden="true" className="w-3 h-3 flex-shrink-0" strokeWidth={2} />
-                  <span className="flex-1 text-left font-medium">
-                    {statusFilter.size > 0
-                      ? [...statusFilter].join(', ')
-                      : showArchived ? 'All + archived' : 'All statuses'}
-                  </span>
-                  {activeFilter ? (
-                    <button
-                      aria-label="Clear status filter"
-                      onClick={e => { e.stopPropagation(); setStatusFilter(new Set()); setShowArchived(false); setFocusedIndex(0); }}
-                      className="flex-shrink-0 opacity-60 hover:opacity-100 transition-opacity"
-                    >
-                      <X aria-hidden="true" className="w-3 h-3" strokeWidth={2} />
-                    </button>
-                  ) : (
-                    <ChevronDown aria-hidden="true" className={`w-3 h-3 flex-shrink-0 transition-transform duration-150 ${showStatusFilter ? 'rotate-180' : ''}`} strokeWidth={2} />
-                  )}
-                </button>
-
-                {showStatusFilter && (
-                  <div className="absolute left-0 right-0 top-full mt-1 bg-white dark:bg-[var(--color-2)] border border-gray-200 dark:border-[var(--border)] rounded-xl shadow-xl overflow-hidden z-40 dropdown-enter">
-                    <div className="p-3">
-                      <p className="text-[10px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wide mb-2">Status</p>
-                      <div className="flex flex-wrap gap-1.5">
-                        {ACTIVE_STATUSES.map(s => {
-                          const active = statusFilter.has(s);
-                          return (
-                            <button
-                              key={s}
-                              onClick={() => toggleStatus(s)}
-                              className={`text-2xs font-medium px-2.5 py-1 rounded-full border transition-colors ${
-                                active
-                                  ? 'bg-[var(--color-50)] dark:bg-[var(--color-950)]/30 text-[var(--color-700)] dark:text-[var(--color-300)] border-[var(--color-300)] dark:border-[var(--color-700)]'
-                                  : 'border-gray-200 dark:border-[var(--border)] text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-[var(--surface-3)]'
-                              }`}
-                            >
-                              {s}
-                            </button>
-                          );
-                        })}
-                      </div>
+                {showNewBatchForm && (
+                  <div ref={newBatchFormRef} className="absolute right-0 top-full mt-1 bg-white dark:bg-[var(--color-2)] border border-gray-200 dark:border-[var(--border)] rounded-xl shadow-xl z-40 dropdown-enter w-64 p-3">
+                    <p className="text-[10px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-2.5">New batch</p>
+                    <div className="mb-2.5">
+                      <label className="text-[10px] text-gray-400 dark:text-gray-500 mb-1 block">Counterparty</label>
+                      <input
+                        type="text"
+                        placeholder="Search counterparty…"
+                        value={newBatchCP}
+                        onChange={e => { setNewBatchCP(e.target.value); setNewBatchCPSearch(e.target.value); }}
+                        className="w-full text-2xs bg-gray-50 dark:bg-[var(--surface-3)] border border-gray-200 dark:border-[var(--border)] rounded-md px-2 py-1.5 text-gray-700 dark:text-gray-200 focus:outline-none focus:ring-1 focus:ring-[var(--color-700)]"
+                        autoFocus
+                      />
+                      {newBatchCPSearch && (
+                        <div className="mt-1 border border-gray-100 dark:border-[var(--border)] rounded-lg overflow-hidden shadow-sm max-h-32 overflow-y-auto">
+                          {allCounterparties
+                            .filter(cp => cp.toLowerCase().includes(newBatchCPSearch.toLowerCase()))
+                            .slice(0, 6)
+                            .map(cp => (
+                              <button
+                                key={cp}
+                                onClick={() => { setNewBatchCP(cp); setNewBatchCPSearch(''); }}
+                                className="w-full text-left px-2.5 py-1.5 text-2xs hover-item text-gray-700 dark:text-gray-200 transition-colors"
+                              >
+                                {cp}
+                              </button>
+                            ))}
+                        </div>
+                      )}
                     </div>
-                    <div className="px-3 pb-3 border-t border-gray-100 dark:border-[var(--border)] pt-3">
+                    <div className="mb-3">
+                      <label className="text-[10px] text-gray-400 dark:text-gray-500 mb-1 block">Cutoff time</label>
+                      <input
+                        type="datetime-local"
+                        value={newBatchCutoff}
+                        onChange={e => setNewBatchCutoff(e.target.value)}
+                        className="w-full text-2xs bg-gray-50 dark:bg-[var(--surface-3)] border border-gray-200 dark:border-[var(--border)] rounded-md px-2 py-1.5 text-gray-700 dark:text-gray-200 focus:outline-none focus:ring-1 focus:ring-[var(--color-700)]"
+                      />
+                    </div>
+                    <div className="flex gap-2">
                       <button
-                        onClick={() => { setShowArchived(v => !v); setFocusedIndex(0); }}
-                        className="w-full flex items-center justify-between text-2xs text-gray-600 dark:text-gray-300 hover:text-gray-800 dark:hover:text-gray-100 transition-colors"
+                        onClick={createBlankBatch}
+                        disabled={!newBatchCP.trim()}
+                        className="flex-1 text-2xs font-semibold bg-[#CDF698] hover:bg-[var(--color-200)] text-gray-900 px-3 py-1.5 rounded-full transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
                       >
-                        <span>Show archived <span className="text-gray-400 dark:text-gray-500">(Revoked · Rejected · Deleted)</span></span>
-                        <span className={`w-7 h-4 rounded-full border transition-colors flex items-center flex-shrink-0 ${showArchived ? 'bg-[var(--color-500)] border-[var(--color-500)]' : 'bg-gray-200 dark:bg-[var(--surface-3)] border-gray-300 dark:border-[var(--border)]'}`}>
-                          <span className={`w-3 h-3 rounded-full bg-white shadow transition-transform mx-0.5 ${showArchived ? 'translate-x-3' : 'translate-x-0'}`} />
-                        </span>
+                        Create
+                      </button>
+                      <button
+                        onClick={() => { setShowNewBatchForm(false); setNewBatchCP(''); setNewBatchCutoff(''); setNewBatchCPSearch(''); }}
+                        className="text-2xs text-gray-500 dark:text-gray-400 px-3 py-1.5 rounded-full border border-gray-200 dark:border-[var(--border)] hover:bg-gray-50 dark:hover:bg-[var(--surface-3)] transition-colors"
+                      >
+                        Cancel
                       </button>
                     </div>
                   </div>
                 )}
               </div>
             </div>
-          );
-        })()}
+          </div>
 
-        <div
-          ref={listRef}
-          role="listbox"
-          aria-label="Batch list"
-          tabIndex={0}
-          className="flex-1 overflow-y-auto p-1.5 space-y-0.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--color-700)]"
-          onKeyDown={handleKeyDown}
-        >
+          {/* ── Filters bar ──────────────────────────────────────────────────── */}
+          <div className="flex-shrink-0 flex items-center gap-2 px-5 py-2.5 bg-white dark:bg-[var(--color-2)] border-b border-gray-100 dark:border-[var(--border)] flex-wrap">
 
-          {filteredBatches.length === 0 && (
-            <div className="flex flex-col items-center justify-center py-10 text-center gap-2">
-              <Calendar aria-hidden="true" className="w-6 h-6 text-gray-300 dark:text-gray-600" strokeWidth={1.5} />
-              <p className="text-xs text-gray-400 dark:text-gray-500">No batches match this filter</p>
-              <button onClick={() => { setDatePreset('all'); setCustomFrom(''); setCustomTo(''); setStatusFilter(new Set()); setShowArchived(false); }} className="text-2xs text-[var(--color-700)] dark:text-[var(--color-300)] hover:underline">Clear filter</button>
-            </div>
-          )}
-          {filteredBatches.map((batch, i) => {
-            const isSelected = batch.id === selectedId;
-            const isFocused = i === focusedIndex;
-            return (
-              <div
-                key={batch.id}
-                role="option"
-                aria-selected={isSelected}
-                className={`px-3 py-2.5 rounded-lg cursor-pointer transition-colors select-none
-                  ${isSelected
-                    ? 'bg-[var(--color-50)] dark:bg-[var(--color-950)]/30'
-                    : 'hover:bg-gray-50 dark:hover:bg-white/5'
-                  }
-                  ${isFocused && !isSelected ? 'ring-1 ring-[var(--color-300)] dark:ring-[var(--color-800)]' : ''}
-                `}
-                onClick={() => {
-                  setSelectedId(batch.id);
-                  setFocusedIndex(i);
-                  setShowOverview(false);
-                  listRef.current?.focus();
-                }}
+            {/* Date filter */}
+            <div className="relative" ref={datePickerRef}>
+              <button
+                onClick={() => setShowDatePicker(v => !v)}
+                className={`flex items-center gap-1.5 text-2xs py-1.5 rounded-lg border transition-colors ${isDateFiltered ? 'pl-2.5 pr-7' : 'px-2.5'} ${
+                  isDateFiltered
+                    ? 'bg-[var(--color-50)] dark:bg-[var(--color-950)]/20 border-[var(--color-300)] dark:border-[var(--color-700)] text-[var(--color-700)] dark:text-[var(--color-300)]'
+                    : 'bg-white dark:bg-[var(--color-1)] border-gray-200 dark:border-[var(--border)] text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-[var(--surface-3)]'
+                }`}
               >
-                <div className="flex items-center gap-2.5">
-                  <CounterpartyAvatar name={batch.counterpartyName} size={28} />
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center justify-between mb-0.5">
-                      <span className={`text-xs font-semibold truncate ${isSelected ? 'text-gray-900 dark:text-[var(--color-300)]' : 'text-gray-800 dark:text-gray-200'}`}>
-                        {batch.counterpartyName}
-                      </span>
-                      <StatusBadge status={batch.origin === 'requested' && batch.status === 'Draft' ? 'Pending' : batch.status} />
+                <Calendar aria-hidden="true" className="w-3 h-3 flex-shrink-0" strokeWidth={2} />
+                <span className="font-medium">{activeDateLabel}</span>
+                {!isDateFiltered && (
+                  <ChevronDown aria-hidden="true" className={`w-3 h-3 flex-shrink-0 transition-transform duration-150 ${showDatePicker ? 'rotate-180' : ''}`} strokeWidth={2} />
+                )}
+              </button>
+              {isDateFiltered && (
+                <button
+                  type="button"
+                  aria-label="Clear date filter"
+                  onClick={() => { setDatePreset('all'); setCustomFrom(''); setCustomTo(''); setFocusedIndex(0); }}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 opacity-60 hover:opacity-100 transition-opacity text-[var(--color-700)] dark:text-[var(--color-300)]"
+                >
+                  <X aria-hidden="true" className="w-3 h-3" strokeWidth={2} />
+                </button>
+              )}
+              {showDatePicker && (
+                <div className="absolute left-0 top-full mt-1 bg-white dark:bg-[var(--color-2)] border border-gray-200 dark:border-[var(--border)] rounded-xl shadow-xl overflow-hidden z-40 dropdown-enter min-w-[220px]">
+                  <div className="p-3">
+                    <p className="text-[10px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wide mb-2">Quick select</p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {PRESETS_DASH.map(({ label, value }) => (
+                        <button
+                          key={value}
+                          onClick={() => { setDatePreset(value); setFocusedIndex(0); setShowDatePicker(false); }}
+                          className={`text-2xs font-medium px-2.5 py-1 rounded-full border transition-colors ${
+                            datePreset === value
+                              ? 'bg-[oklch(0.910_0.005_264)] dark:bg-[oklch(0.268_0.011_264)] text-[var(--color-700)] dark:text-[var(--color-300)] border-[var(--color-300)] dark:border-[var(--color-700)]'
+                              : 'border-gray-200 dark:border-[var(--border)] text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-[var(--surface-3)]'
+                          }`}
+                        >
+                          {label}
+                        </button>
+                      ))}
                     </div>
-                    <div className="flex items-center justify-between">
-                      <span className={`text-2xs tabular-nums ${isSelected ? 'text-gray-500 dark:text-gray-400' : 'text-gray-400 dark:text-gray-500'}`}>
-                        {fmtCutoff(batch.cutoffTime)}
-                      </span>
-                      <span className={`text-2xs tabular-nums font-medium ${isSelected ? 'text-gray-700 dark:text-gray-300' : 'text-gray-600 dark:text-gray-300'}`}>
-                        {fmtUsdCompact(batch.totalUsd)}
-                      </span>
+                  </div>
+                  <div className="px-3 pb-3 border-t border-gray-100 dark:border-[var(--border)] pt-3">
+                    <p className="text-[10px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wide mb-2">Custom range</p>
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <label className="text-[10px] text-gray-400 dark:text-gray-500 mb-1 block">From</label>
+                        <input
+                          type="date"
+                          value={customFrom}
+                          onChange={e => { setCustomFrom(e.target.value); setDatePreset('custom'); setFocusedIndex(0); }}
+                          className="w-full text-2xs bg-gray-50 dark:bg-[var(--surface-3)] border border-gray-200 dark:border-[var(--border)] rounded-md px-2 py-1 text-gray-700 dark:text-gray-200 focus:outline-none focus:ring-1 focus:ring-[var(--color-700)]"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[10px] text-gray-400 dark:text-gray-500 mb-1 block">To</label>
+                        <input
+                          type="date"
+                          value={customTo}
+                          onChange={e => { setCustomTo(e.target.value); setDatePreset('custom'); setFocusedIndex(0); }}
+                          className="w-full text-2xs bg-gray-50 dark:bg-[var(--surface-3)] border border-gray-200 dark:border-[var(--border)] rounded-md px-2 py-1 text-gray-700 dark:text-gray-200 focus:outline-none focus:ring-1 focus:ring-[var(--color-700)]"
+                        />
+                      </div>
                     </div>
                   </div>
                 </div>
+              )}
+            </div>
+
+            {/* Status filter */}
+            <div className="relative" ref={statusFilterRef}>
+              <button
+                onClick={() => setShowStatusFilter(v => !v)}
+                className={`flex items-center gap-1.5 text-2xs py-1.5 rounded-lg border transition-colors ${isStatusFiltered ? 'pl-2.5 pr-7' : 'px-2.5'} ${
+                  isStatusFiltered
+                    ? 'bg-[var(--color-50)] dark:bg-[var(--color-950)]/20 border-[var(--color-300)] dark:border-[var(--color-700)] text-[var(--color-700)] dark:text-[var(--color-300)]'
+                    : 'bg-white dark:bg-[var(--color-1)] border-gray-200 dark:border-[var(--border)] text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-[var(--surface-3)]'
+                }`}
+              >
+                <Filter aria-hidden="true" className="w-3 h-3 flex-shrink-0" strokeWidth={2} />
+                <span className="font-medium">
+                  {statusFilter.size > 0
+                    ? [...statusFilter].join(', ')
+                    : showArchived ? 'All + archived' : 'Status'}
+                </span>
+                {!isStatusFiltered && (
+                  <ChevronDown aria-hidden="true" className={`w-3 h-3 flex-shrink-0 transition-transform duration-150 ${showStatusFilter ? 'rotate-180' : ''}`} strokeWidth={2} />
+                )}
+              </button>
+              {isStatusFiltered && (
+                <button
+                  type="button"
+                  aria-label="Clear status filter"
+                  onClick={() => { setStatusFilter(new Set()); setShowArchived(false); setFocusedIndex(0); }}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 opacity-60 hover:opacity-100 transition-opacity text-[var(--color-700)] dark:text-[var(--color-300)]"
+                >
+                  <X aria-hidden="true" className="w-3 h-3" strokeWidth={2} />
+                </button>
+              )}
+              {showStatusFilter && (
+                <div className="absolute left-0 top-full mt-1 bg-white dark:bg-[var(--color-2)] border border-gray-200 dark:border-[var(--border)] rounded-xl shadow-xl overflow-hidden z-40 dropdown-enter min-w-[200px]">
+                  <div className="p-3">
+                    <p className="text-[10px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wide mb-2">Status</p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {ACTIVE_STATUSES.map(s => {
+                        const active = statusFilter.has(s);
+                        return (
+                          <button
+                            key={s}
+                            onClick={() => {
+                              setStatusFilter(prev => {
+                                const next = new Set(prev);
+                                if (next.has(s)) next.delete(s); else next.add(s);
+                                return next;
+                              });
+                              setFocusedIndex(0);
+                            }}
+                            className={`text-2xs font-medium px-2.5 py-1 rounded-full border transition-colors ${
+                              active
+                                ? 'bg-[oklch(0.910_0.005_264)] dark:bg-[oklch(0.268_0.011_264)] text-[var(--color-700)] dark:text-[var(--color-300)] border-[var(--color-300)] dark:border-[var(--color-700)]'
+                                : 'border-gray-200 dark:border-[var(--border)] text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-[var(--surface-3)]'
+                            }`}
+                          >
+                            {s}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                  <div className="px-3 pb-3 border-t border-gray-100 dark:border-[var(--border)] pt-3">
+                    <button
+                      onClick={() => { setShowArchived(v => !v); setFocusedIndex(0); }}
+                      className="w-full flex items-center justify-between text-2xs text-gray-600 dark:text-gray-300 hover:text-gray-800 dark:hover:text-gray-100 transition-colors"
+                    >
+                      <span>Show archived <span className="text-gray-400 dark:text-gray-500">(Revoked · Rejected · Deleted)</span></span>
+                      <span className={`w-7 h-4 rounded-full border transition-colors flex items-center flex-shrink-0 ${showArchived ? 'bg-[var(--color-500)] border-[var(--color-500)]' : 'bg-gray-200 dark:bg-[var(--surface-3)] border-gray-300 dark:border-[var(--border)]'}`}>
+                        <span className={`w-3 h-3 rounded-full bg-white shadow transition-transform mx-0.5 ${showArchived ? 'translate-x-3' : 'translate-x-0'}`} />
+                      </span>
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Counterparty filter */}
+            <div className="relative" ref={cpFilterRef}>
+              <button
+                onClick={() => setShowCpFilter(v => !v)}
+                className={`flex items-center gap-1.5 text-2xs py-1.5 rounded-lg border transition-colors ${isCpFiltered ? 'pl-2.5 pr-7' : 'px-2.5'} ${
+                  isCpFiltered
+                    ? 'bg-[var(--color-50)] dark:bg-[var(--color-950)]/20 border-[var(--color-300)] dark:border-[var(--color-700)] text-[var(--color-700)] dark:text-[var(--color-300)]'
+                    : 'bg-white dark:bg-[var(--color-1)] border-gray-200 dark:border-[var(--border)] text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-[var(--surface-3)]'
+                }`}
+              >
+                <Users aria-hidden="true" className="w-3 h-3 flex-shrink-0" strokeWidth={2} />
+                <span className="font-medium">
+                  {cpFilter.size === 0
+                    ? 'Counterparty'
+                    : cpFilter.size === 1
+                      ? Array.from(cpFilter)[0]
+                      : `${cpFilter.size} counterparties`}
+                </span>
+                {!isCpFiltered && (
+                  <ChevronDown aria-hidden="true" className={`w-3 h-3 flex-shrink-0 transition-transform duration-150 ${showCpFilter ? 'rotate-180' : ''}`} strokeWidth={2} />
+                )}
+              </button>
+              {isCpFiltered && (
+                <button
+                  type="button"
+                  aria-label="Clear counterparty filter"
+                  onClick={() => { setCpFilter(new Set()); setCpSearch(''); setFocusedIndex(0); }}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 opacity-60 hover:opacity-100 transition-opacity text-[var(--color-700)] dark:text-[var(--color-300)]"
+                >
+                  <X aria-hidden="true" className="w-3 h-3" strokeWidth={2} />
+                </button>
+              )}
+              {showCpFilter && (
+                <div className="absolute left-0 top-full mt-1 bg-white dark:bg-[var(--color-2)] border border-gray-200 dark:border-[var(--border)] rounded-xl shadow-xl overflow-hidden z-40 dropdown-enter min-w-[200px]">
+                  <div className="p-2">
+                    <input
+                      type="text"
+                      placeholder="Search counterparty…"
+                      aria-label="Search counterparties"
+                      value={cpSearch}
+                      onChange={e => setCpSearch(e.target.value)}
+                      className="w-full text-2xs bg-gray-50 dark:bg-[var(--surface-3)] border border-gray-200 dark:border-[var(--border)] rounded-md px-2 py-1 text-gray-700 dark:text-gray-200 focus:outline-none focus:ring-1 focus:ring-[var(--color-700)]"
+                      autoFocus
+                    />
+                  </div>
+                  <div className="max-h-48 overflow-y-auto pb-1">
+                    {allCounterparties
+                      .filter(cp => cp.toLowerCase().includes(cpSearch.toLowerCase()))
+                      .map(cp => (
+                        <button
+                          key={cp}
+                          onClick={() => {
+                            setCpFilter(prev => {
+                              const next = new Set(prev);
+                              next.has(cp) ? next.delete(cp) : next.add(cp);
+                              return next;
+                            });
+                          }}
+                          className="w-full flex items-center gap-2 px-3 py-1.5 text-2xs hover-item transition-colors text-left"
+                        >
+                          <span className={`w-3.5 h-3.5 rounded border flex-shrink-0 flex items-center justify-center ${
+                            cpFilter.has(cp)
+                              ? 'bg-[var(--color-700)] border-[var(--color-700)] dark:bg-[var(--color-300)] dark:border-[var(--color-300)]'
+                              : 'border-gray-300 dark:border-gray-600'
+                          }`}>
+                            {cpFilter.has(cp) && <Check aria-hidden="true" className="w-2.5 h-2.5 text-white dark:text-gray-900" strokeWidth={3} />}
+                          </span>
+                          <span className="text-gray-700 dark:text-gray-200 truncate">{cp}</span>
+                        </button>
+                      ))}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Clear all */}
+            {isAnyFiltered && (
+              <button
+                onClick={() => {
+                  setDatePreset('all');
+                  setCustomFrom('');
+                  setCustomTo('');
+                  setStatusFilter(new Set());
+                  setShowArchived(false);
+                  setCpFilter(new Set());
+                  setCpSearch('');
+                  setFocusedIndex(0);
+                }}
+                className="text-2xs text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 transition-colors ml-1"
+              >
+                Clear all
+              </button>
+            )}
+          </div>
+
+          {/* ── Dashboard content ─────────────────────────────────────────────── */}
+          <div className="flex-1 overflow-y-auto px-5 py-4 space-y-4">
+
+            {/* Metrics row — 6 cards */}
+            <div className="grid grid-cols-3 gap-3 lg:grid-cols-6">
+              {[
+                { label: 'Draft',    count: draftCount,    accent: 'text-gray-500 dark:text-gray-400' },
+                { label: 'Pending',  count: pendingCount,  accent: 'text-amber-600 dark:text-amber-400' },
+                { label: 'Approved', count: approvedCount, accent: 'text-[var(--color-700)] dark:text-[var(--color-300)]' },
+              ].map(({ label, count, accent }) => (
+                <div key={label} className="rounded-xl bg-white dark:bg-[var(--color-2)] shadow-md dark:shadow-[0_8px_24px_rgba(0,0,0,0.5)] px-4 py-3">
+                  <p className={`text-2xs uppercase tracking-wide font-semibold ${accent}`}>{label}</p>
+                  <p className="text-2xl font-bold tabular-nums mt-1 text-gray-900 dark:text-gray-100">{count}</p>
+                  <p className="text-2xs text-gray-400 dark:text-gray-500 mt-0.5">batch{count !== 1 ? 'es' : ''}</p>
+                </div>
+              ))}
+              <div className="rounded-xl bg-white dark:bg-[var(--color-2)] shadow-md dark:shadow-[0_8px_24px_rgba(0,0,0,0.5)] px-4 py-3">
+                <div className="flex items-center gap-1.5">
+                  <ArrowUp aria-hidden="true" className="w-3.5 h-3.5 text-[var(--negative)]" strokeWidth={2} />
+                  <p className="text-2xs uppercase tracking-wide font-semibold text-[var(--negative)]">To deliver</p>
+                </div>
+                <p className="text-base font-bold tabular-nums mt-1.5 text-gray-900 dark:text-gray-100">{fmtUsdFull(totalDeliver)}</p>
               </div>
-            );
-          })}
+              <div className="rounded-xl bg-white dark:bg-[var(--color-2)] shadow-md dark:shadow-[0_8px_24px_rgba(0,0,0,0.5)] px-4 py-3">
+                <div className="flex items-center gap-1.5">
+                  <ArrowDown aria-hidden="true" className="w-3.5 h-3.5 text-[var(--positive)]" strokeWidth={2} />
+                  <p className="text-2xs uppercase tracking-wide font-semibold text-[var(--positive)]">To receive</p>
+                </div>
+                <p className="text-base font-bold tabular-nums mt-1.5 text-gray-900 dark:text-gray-100">{fmtUsdFull(totalReceive)}</p>
+              </div>
+              <div className="rounded-xl bg-white dark:bg-[var(--color-2)] shadow-md dark:shadow-[0_8px_24px_rgba(0,0,0,0.5)] px-4 py-3">
+                <p className="text-2xs uppercase tracking-wide font-semibold text-gray-500 dark:text-gray-400">Net position</p>
+                <p className={`text-base font-bold tabular-nums mt-1.5 ${dashNet >= 0 ? 'text-[var(--positive)]' : 'text-[var(--negative)]'}`}>
+                  {dashNet >= 0 ? '+' : '−'}{fmtUsdFull(Math.abs(dashNet))}
+                </p>
+              </div>
+            </div>
+
+            {/* Batches table */}
+            <div className="rounded-2xl overflow-hidden bg-white dark:bg-[var(--color-2)] shadow-md">
+              <div className="flex items-center justify-between px-4 py-2.5 border-b border-gray-100 dark:border-[var(--border)]">
+                <span className="text-2xs font-medium text-gray-700 dark:text-gray-200">Batches</span>
+                <span className="text-2xs text-gray-400 dark:text-gray-500 tabular-nums">
+                  {filteredBatches.length} batch{filteredBatches.length !== 1 ? 'es' : ''}
+                </span>
+              </div>
+
+              {filteredBatches.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-12 text-gray-400 dark:text-gray-500 gap-2">
+                  <Calendar aria-hidden="true" className="w-8 h-8 opacity-40" strokeWidth={1.5} />
+                  <p className="text-sm">No batches match the current filters</p>
+                  <button
+                    onClick={() => { setDatePreset('all'); setCustomFrom(''); setCustomTo(''); setStatusFilter(new Set()); setShowArchived(false); setCpFilter(new Set()); }}
+                    className="text-2xs text-[var(--color-700)] dark:text-[var(--color-300)] hover:underline"
+                  >
+                    Clear filters
+                  </button>
+                </div>
+              ) : (
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="bg-gray-50 dark:bg-[var(--color-1)] text-gray-500 dark:text-gray-400 border-b border-gray-100 dark:border-[var(--border)] text-[10px] uppercase tracking-wide">
+                      {sortTh('id',           'Batch ID',    'text-left pl-4 pr-2 py-2')}
+                      {sortTh('counterparty', 'Counterparty','text-left px-2 py-2')}
+                      {sortTh('status',       'Status',      'text-left px-2 py-2')}
+                      {sortTh('cutoff',       'Cutoff',      'text-left px-2 py-2')}
+                      {sortTh('deliver',      'To deliver',  'text-right px-2 py-2')}
+                      {sortTh('receive',      'To receive',  'text-right px-2 py-2')}
+                      {sortTh('net',          'Net position','text-right pr-4 py-2')}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {sortedBatchTable.map(batch => {
+                      const bDeliver = batch.deliverObligations.reduce((s, o) => s + o.amountUsd, 0);
+                      const bReceive = batch.receiveObligations.reduce((s, o) => s + o.amountUsd, 0);
+                      const bNet = bReceive - bDeliver;
+                      return (
+                        <tr
+                          key={batch.id}
+                          onClick={() => openBatchDetail(batch.id)}
+                          className="cursor-pointer hover:bg-gray-50 dark:hover:bg-[var(--surface-3)] border-b border-gray-100 dark:border-[var(--border)] last:border-b-0 transition-colors group"
+                        >
+                          <td className="pl-4 pr-2 py-2.5 text-[10px] text-gray-500 dark:text-gray-400">{batch.id}</td>
+                          <td className="px-2 py-2.5">
+                            <div className="flex items-center gap-2">
+                              <CounterpartyAvatar name={batch.counterpartyName} size={18} />
+                              <span className="font-medium text-gray-800 dark:text-gray-100 group-hover:text-gray-900 dark:group-hover:text-white">{batch.counterpartyName}</span>
+                              <ChevronRight aria-hidden="true" className="w-3 h-3 text-gray-300 dark:text-gray-600 opacity-0 group-hover:opacity-100 transition-opacity" strokeWidth={2} />
+                            </div>
+                          </td>
+                          <td className="px-2 py-2.5">
+                            <StatusBadge status={batch.origin === 'requested' && batch.status === 'Draft' ? 'Pending' : batch.status} pct={getBatchClearedPct(batch)} />
+                          </td>
+                          <td className="px-2 py-2.5 text-gray-500 dark:text-gray-400 tabular-nums">{fmtCutoff(batch.cutoffTime)}</td>
+                          <td className="text-right px-2 py-2.5 tabular-nums text-[var(--negative)]">{bDeliver > 0 ? fmtUsdFull(bDeliver) : '—'}</td>
+                          <td className="text-right px-2 py-2.5 tabular-nums text-[var(--positive)]">{bReceive > 0 ? fmtUsdFull(bReceive) : '—'}</td>
+                          <td className={`text-right pr-4 py-2.5 tabular-nums font-semibold ${bNet >= 0 ? 'text-[var(--positive)]' : 'text-[var(--negative)]'}`}>
+                            {bNet >= 0 ? '+' : '−'}{fmtUsdFull(Math.abs(bNet))}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {showImport && (
+          <ImportModal onConfirm={handleImportConfirm} onClose={() => setShowImport(false)} />
+        )}
+      </>
+    );
+  }
+
+  // Inline helpers for detail mode filter chips
+  const DETAIL_PRESETS: { label: string; value: DatePreset }[] = [
+    { label: 'Today', value: 'today' }, { label: 'All time', value: 'all' },
+    { label: '24h', value: '24h' }, { label: '3 days', value: '3d' },
+    { label: '7 days', value: '7d' }, { label: '30 days', value: '30d' },
+    { label: '3 months', value: '3m' },
+  ];
+  const fmtShortDetail = (iso: string) => new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  const detailDateLabel = datePreset === 'today' ? 'Today'
+    : datePreset === 'custom'
+      ? (customFrom || customTo ? [customFrom && fmtShortDetail(customFrom), customTo && fmtShortDetail(customTo)].filter(Boolean).join('–') : 'Custom')
+      : (DETAIL_PRESETS.find(p => p.value === datePreset)?.label ?? 'All');
+  const isDateActive = datePreset !== 'all';
+  const isStatusActive = statusFilter.size > 0 || showArchived;
+  const toggleDetailStatus = (s: BatchStatus) => {
+    setStatusFilter(prev => { const next = new Set(prev); next.has(s) ? next.delete(s) : next.add(s); return next; });
+    setFocusedIndex(0);
+  };
+
+  return (
+    <div className="flex flex-col h-full overflow-hidden">
+
+      {/* ── TOP TOOLBAR: breadcrumb + countdown + CTA ─────────────────── */}
+      <div className="flex-shrink-0 flex items-center gap-2 px-4 py-2.5 bg-white dark:bg-black border-b border-gray-200 dark:border-[var(--border)]">
+
+        {/* Back + breadcrumb */}
+        {initialCpFilter ? (
+          <>
+            <button
+              onClick={() => window.dispatchEvent(new CustomEvent('navigate-to-counterparty', { detail: initialCpFilter }))}
+              className="flex items-center gap-1 text-2xs font-medium text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 transition-colors flex-shrink-0"
+            >
+              <ChevronRight aria-hidden="true" className="w-3 h-3 rotate-180" strokeWidth={2} />
+              Counterparties
+            </button>
+            <span className="text-gray-300 dark:text-gray-600 text-xs">/</span>
+            <button
+              onClick={() => window.dispatchEvent(new CustomEvent('navigate-to-counterparty', { detail: initialCpFilter }))}
+              className="flex items-center gap-1.5 text-2xs font-medium text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 transition-colors flex-shrink-0 truncate max-w-[200px]"
+            >
+              <CounterpartyAvatar name={initialCpFilter} size={16} />
+              {initialCpFilter}
+            </button>
+            <span className="text-gray-300 dark:text-gray-600 text-xs">/</span>
+            {selectedBatch && (
+              <span className="text-2xs text-gray-400 dark:text-gray-500 truncate">{selectedBatch.id}</span>
+            )}
+          </>
+        ) : (
+          <>
+            <button
+              onClick={goToDashboard}
+              className="flex items-center gap-1 text-2xs font-medium text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 transition-colors flex-shrink-0"
+            >
+              <ChevronRight aria-hidden="true" className="w-3 h-3 rotate-180" strokeWidth={2} />
+              Batches
+            </button>
+            {selectedBatch && (
+              <>
+                <span className="text-gray-300 dark:text-gray-600 text-xs">/</span>
+                <span className="flex items-center gap-1.5 text-2xs font-medium text-gray-700 dark:text-gray-300 truncate max-w-[200px]">
+                  <CounterpartyAvatar name={selectedBatch.counterpartyName} size={16} />
+                  {selectedBatch.counterpartyName}
+                </span>
+                <span className="text-2xs text-gray-400 dark:text-gray-500 truncate">{selectedBatch.id}</span>
+              </>
+            )}
+          </>
+        )}
+
+        <div className="flex-1" />
+
+        {/* Countdown */}
+        {countdown && (
+          <button
+            onClick={() => window.dispatchEvent(new CustomEvent('navigate-tab', { detail: 'cycles' }))}
+            className="flex items-center gap-1 text-2xs text-amber-600 dark:text-amber-400 hover:text-amber-700 dark:hover:text-amber-300 transition-colors flex-shrink-0"
+          >
+            <NumberFlowGroup>
+              <span className="tabular-nums flex items-center" style={{ fontVariantNumeric: 'tabular-nums' }}>
+                <NumberFlow trend={-1} value={parseInt(countdown.hh)} format={{ minimumIntegerDigits: 2 }} />
+                <span className="mx-[1px] opacity-60">:</span>
+                <NumberFlow trend={-1} value={parseInt(countdown.mm)} format={{ minimumIntegerDigits: 2 }} digits={{ 1: { max: 5 } }} />
+              </span>
+            </NumberFlowGroup>
+            <span className="text-gray-400 dark:text-gray-500">· next cycle →</span>
+          </button>
+        )}
+
+      </div>
+
+      {/* ── BODY: left list + right detail ───────────────────────────── */}
+      <div className="flex flex-1 overflow-hidden">
+
+        {/* ── LEFT PANEL: compact searchable batch list ─────────────── */}
+        <div className="w-[30%] min-w-[280px] max-w-[340px] flex-shrink-0 flex flex-col border-r border-gray-100 dark:border-[var(--border)] bg-white dark:bg-black relative z-10">
+
+          {/* Panel header: label + Add batch */}
+          <div className="px-3 pt-3 pb-1 flex items-center justify-between">
+            <span className="text-[10px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wide">Batches</span>
+            <div className="relative" ref={addMenuRef}>
+              <button
+                onClick={() => { setShowAddMenu(v => !v); setShowNewBatchForm(false); }}
+                className="flex items-center gap-1 text-2xs font-medium text-gray-900 bg-[#CDF698] hover:bg-[var(--color-200)] px-2.5 py-1 rounded-full transition-colors"
+              >
+                <Plus aria-hidden="true" className="w-3 h-3" strokeWidth={2.5} />
+                Add batch
+                <ChevronDown aria-hidden="true" className={`w-3 h-3 transition-transform duration-150 ${showAddMenu ? 'rotate-180' : ''}`} strokeWidth={2} />
+              </button>
+
+              {showAddMenu && !showNewBatchForm && (
+                <div className="absolute right-0 top-full mt-1 bg-white dark:bg-[var(--color-2)] border border-gray-200 dark:border-[var(--border)] rounded-xl shadow-xl overflow-hidden z-50 dropdown-enter min-w-[160px]">
+                  <button
+                    onClick={() => { setShowNewBatchForm(true); setShowAddMenu(false); }}
+                    className="w-full flex items-center gap-2 px-3 py-2 text-2xs hover-item transition-colors text-left text-gray-700 dark:text-gray-200"
+                  >
+                    <FileText aria-hidden="true" className="w-3 h-3 text-gray-400" strokeWidth={2} />
+                    New blank batch
+                  </button>
+                  <button
+                    onClick={() => { setShowImport(true); setShowAddMenu(false); }}
+                    className="w-full flex items-center gap-2 px-3 py-2 text-2xs hover-item transition-colors text-left text-gray-700 dark:text-gray-200"
+                  >
+                    <Upload aria-hidden="true" className="w-3 h-3 text-gray-400" strokeWidth={2} />
+                    Import CSV
+                  </button>
+                </div>
+              )}
+
+              {showNewBatchForm && (
+                <div ref={newBatchFormRef} className="absolute right-0 top-full mt-1 bg-white dark:bg-[var(--color-2)] border border-gray-200 dark:border-[var(--border)] rounded-xl shadow-xl z-50 dropdown-enter w-64 p-3">
+                  <p className="text-[10px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-2.5">New batch</p>
+                  <div className="mb-2.5">
+                    <label className="text-[10px] text-gray-400 dark:text-gray-500 mb-1 block">Counterparty</label>
+                    <input
+                      type="text"
+                      placeholder="Search counterparty…"
+                      value={newBatchCP}
+                      onChange={e => { setNewBatchCP(e.target.value); setNewBatchCPSearch(e.target.value); }}
+                      className="w-full text-2xs bg-gray-50 dark:bg-[var(--surface-3)] border border-gray-200 dark:border-[var(--border)] rounded-md px-2 py-1.5 text-gray-700 dark:text-gray-200 focus:outline-none focus:ring-1 focus:ring-[var(--color-700)]"
+                      autoFocus
+                    />
+                    {newBatchCPSearch && (
+                      <div className="mt-1 border border-gray-100 dark:border-[var(--border)] rounded-lg overflow-hidden shadow-sm max-h-32 overflow-y-auto">
+                        {allCounterparties.filter(cp => cp.toLowerCase().includes(newBatchCPSearch.toLowerCase())).slice(0, 6).map(cp => (
+                          <button key={cp} onClick={() => { setNewBatchCP(cp); setNewBatchCPSearch(''); }} className="w-full text-left px-2.5 py-1.5 text-2xs hover-item text-gray-700 dark:text-gray-200 transition-colors">{cp}</button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                  <div className="mb-3">
+                    <label className="text-[10px] text-gray-400 dark:text-gray-500 mb-1 block">Cutoff time</label>
+                    <input type="datetime-local" value={newBatchCutoff} onChange={e => setNewBatchCutoff(e.target.value)} className="w-full text-2xs bg-gray-50 dark:bg-[var(--surface-3)] border border-gray-200 dark:border-[var(--border)] rounded-md px-2 py-1.5 text-gray-700 dark:text-gray-200 focus:outline-none focus:ring-1 focus:ring-[var(--color-700)]" />
+                  </div>
+                  <div className="flex gap-2">
+                    <button onClick={createBlankBatch} disabled={!newBatchCP.trim()} className="flex-1 text-2xs font-semibold bg-[#CDF698] hover:bg-[var(--color-200)] text-gray-900 px-3 py-1.5 rounded-full transition-colors disabled:opacity-40 disabled:cursor-not-allowed">Create</button>
+                    <button onClick={() => { setShowNewBatchForm(false); setNewBatchCP(''); setNewBatchCutoff(''); setNewBatchCPSearch(''); }} className="text-2xs text-gray-500 dark:text-gray-400 px-3 py-1.5 rounded-full border border-gray-200 dark:border-[var(--border)] hover:bg-gray-50 dark:hover:bg-[var(--surface-3)] transition-colors">Cancel</button>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Search */}
+          <div className="px-3 pt-1 pb-2">
+            <div className="relative">
+              <Search aria-hidden="true" className="absolute left-2 top-1/2 -translate-y-1/2 w-3 h-3 text-gray-400 dark:text-gray-500" strokeWidth={2} />
+              <input
+                type="text"
+                placeholder="Search batches…"
+                aria-label="Search batches"
+                value={listSearch}
+                onChange={e => setListSearch(e.target.value)}
+                className="w-full text-2xs pl-6 pr-6 py-1.5 bg-gray-50 dark:bg-[var(--surface-3)] border border-gray-200 dark:border-[var(--border)] rounded-lg text-gray-700 dark:text-gray-200 focus:outline-none focus:ring-1 focus:ring-[var(--color-700)]"
+              />
+              {listSearch && (
+                <button
+                  type="button"
+                  aria-label="Clear search"
+                  onClick={() => setListSearch('')}
+                  className="absolute right-1.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
+                >
+                  <X aria-hidden="true" className="w-3 h-3" strokeWidth={2} />
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* Filter chips row */}
+          <div className="px-3 pb-2 flex items-center gap-1.5 flex-wrap">
+
+            {/* Date chip */}
+            <div className="relative" ref={datePickerRef}>
+              <button
+                onClick={() => setShowDatePicker(v => !v)}
+                className={`flex items-center gap-1 text-[10px] font-medium px-2 py-0.5 rounded-full border transition-colors ${
+                  isDateActive
+                    ? 'bg-[var(--color-50)] dark:bg-[var(--color-950)]/20 border-[var(--color-300)] dark:border-[var(--color-700)] text-[var(--color-700)] dark:text-[var(--color-300)]'
+                    : 'border-gray-200 dark:border-[var(--border)] text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-[var(--surface-3)]'
+                }`}
+              >
+                <Calendar aria-hidden="true" className="w-2.5 h-2.5" strokeWidth={2} />
+                {detailDateLabel}
+                {isDateActive
+                  ? <button type="button" aria-label="Clear date" onClick={e => { e.stopPropagation(); setDatePreset('all'); setCustomFrom(''); setCustomTo(''); setFocusedIndex(0); }} className="ml-0.5 opacity-60 hover:opacity-100"><X aria-hidden="true" className="w-2.5 h-2.5" strokeWidth={2} /></button>
+                  : <ChevronDown aria-hidden="true" className={`w-2.5 h-2.5 transition-transform ${showDatePicker ? 'rotate-180' : ''}`} strokeWidth={2} />
+                }
+              </button>
+              {showDatePicker && (
+                <div className="absolute left-0 top-full mt-1 bg-white dark:bg-[var(--color-2)] border border-gray-200 dark:border-[var(--border)] rounded-xl shadow-xl overflow-hidden z-40 dropdown-enter w-56">
+                  <div className="p-3">
+                    <p className="text-[10px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wide mb-2">Quick select</p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {DETAIL_PRESETS.map(({ label, value }) => (
+                        <button key={value} onClick={() => { setDatePreset(value); setFocusedIndex(0); setShowDatePicker(false); }}
+                          className={`text-2xs font-medium px-2.5 py-1 rounded-full border transition-colors ${
+                            datePreset === value
+                              ? 'bg-[oklch(0.910_0.005_264)] dark:bg-[oklch(0.268_0.011_264)] text-[var(--color-700)] dark:text-[var(--color-300)] border-[var(--color-300)] dark:border-[var(--color-700)]'
+                              : 'border-gray-200 dark:border-[var(--border)] text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-[var(--surface-3)]'
+                          }`}>{label}</button>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="px-3 pb-3 border-t border-gray-100 dark:border-[var(--border)] pt-3">
+                    <p className="text-[10px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wide mb-2">Custom range</p>
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <label className="text-[10px] text-gray-400 dark:text-gray-500 mb-1 block">From</label>
+                        <input type="date" value={customFrom} onChange={e => { setCustomFrom(e.target.value); setDatePreset('custom'); setFocusedIndex(0); }} className="w-full text-2xs bg-gray-50 dark:bg-[var(--surface-3)] border border-gray-200 dark:border-[var(--border)] rounded-md px-2 py-1 text-gray-700 dark:text-gray-200 focus:outline-none" />
+                      </div>
+                      <div>
+                        <label className="text-[10px] text-gray-400 dark:text-gray-500 mb-1 block">To</label>
+                        <input type="date" value={customTo} onChange={e => { setCustomTo(e.target.value); setDatePreset('custom'); setFocusedIndex(0); }} className="w-full text-2xs bg-gray-50 dark:bg-[var(--surface-3)] border border-gray-200 dark:border-[var(--border)] rounded-md px-2 py-1 text-gray-700 dark:text-gray-200 focus:outline-none" />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Status chip */}
+            <div className="relative" ref={statusFilterRef}>
+              <button
+                onClick={() => setShowStatusFilter(v => !v)}
+                className={`flex items-center gap-1 text-[10px] font-medium px-2 py-0.5 rounded-full border transition-colors ${
+                  isStatusActive
+                    ? 'bg-[var(--color-50)] dark:bg-[var(--color-950)]/20 border-[var(--color-300)] dark:border-[var(--color-700)] text-[var(--color-700)] dark:text-[var(--color-300)]'
+                    : 'border-gray-200 dark:border-[var(--border)] text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-[var(--surface-3)]'
+                }`}
+              >
+                <Filter aria-hidden="true" className="w-2.5 h-2.5" strokeWidth={2} />
+                {isStatusActive
+                  ? statusFilter.size > 0 ? [...statusFilter].join(', ') : 'All+archived'
+                  : 'Status'}
+                {isStatusActive
+                  ? <button type="button" aria-label="Clear status" onClick={e => { e.stopPropagation(); setStatusFilter(new Set()); setShowArchived(false); setFocusedIndex(0); }} className="ml-0.5 opacity-60 hover:opacity-100"><X aria-hidden="true" className="w-2.5 h-2.5" strokeWidth={2} /></button>
+                  : <ChevronDown aria-hidden="true" className={`w-2.5 h-2.5 transition-transform ${showStatusFilter ? 'rotate-180' : ''}`} strokeWidth={2} />
+                }
+              </button>
+              {showStatusFilter && (
+                <div className="absolute left-0 top-full mt-1 bg-white dark:bg-[var(--color-2)] border border-gray-200 dark:border-[var(--border)] rounded-xl shadow-xl overflow-hidden z-40 dropdown-enter w-52">
+                  <div className="p-3">
+                    <p className="text-[10px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wide mb-2">Status</p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {ACTIVE_STATUSES.map(s => {
+                        const active = statusFilter.has(s);
+                        return (
+                          <button key={s} onClick={() => toggleDetailStatus(s)}
+                            className={`text-2xs font-medium px-2.5 py-1 rounded-full border transition-colors ${
+                              active
+                                ? 'bg-[oklch(0.910_0.005_264)] dark:bg-[oklch(0.268_0.011_264)] text-[var(--color-700)] dark:text-[var(--color-300)] border-[var(--color-300)] dark:border-[var(--color-700)]'
+                                : 'border-gray-200 dark:border-[var(--border)] text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-[var(--surface-3)]'
+                            }`}>{s}</button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                  <div className="px-3 pb-3 border-t border-gray-100 dark:border-[var(--border)] pt-3">
+                    <button onClick={() => { setShowArchived(v => !v); setFocusedIndex(0); }} className="w-full flex items-center justify-between text-2xs text-gray-600 dark:text-gray-300 hover:text-gray-800 dark:hover:text-gray-100 transition-colors">
+                      <span>Show archived</span>
+                      <span className={`w-7 h-4 rounded-full border transition-colors flex items-center flex-shrink-0 ${showArchived ? 'bg-[var(--color-500)] border-[var(--color-500)]' : 'bg-gray-200 dark:bg-[var(--surface-3)] border-gray-300 dark:border-[var(--border)]'}`}>
+                        <span className={`w-3 h-3 rounded-full bg-white shadow transition-transform mx-0.5 ${showArchived ? 'translate-x-3' : 'translate-x-0'}`} />
+                      </span>
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Counterparty chip */}
+            <div className="relative" ref={cpFilterRef}>
+              <button
+                onClick={() => setShowCpFilter(v => !v)}
+                className={`flex items-center gap-1 text-[10px] font-medium px-2 py-0.5 rounded-full border transition-colors ${
+                  cpFilter.size > 0
+                    ? 'bg-[var(--color-50)] dark:bg-[var(--color-950)]/20 border-[var(--color-300)] dark:border-[var(--color-700)] text-[var(--color-700)] dark:text-[var(--color-300)]'
+                    : 'border-gray-200 dark:border-[var(--border)] text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-[var(--surface-3)]'
+                }`}
+              >
+                <Users aria-hidden="true" className="w-2.5 h-2.5" strokeWidth={2} />
+                {cpFilter.size === 0 ? 'Counterparty' : cpFilter.size === 1 ? Array.from(cpFilter)[0] : `${cpFilter.size} CPs`}
+                {cpFilter.size > 0
+                  ? <button type="button" aria-label="Clear counterparty filter" onClick={e => { e.stopPropagation(); setCpFilter(new Set()); setCpSearch(''); setFocusedIndex(0); }} className="ml-0.5 opacity-60 hover:opacity-100"><X aria-hidden="true" className="w-2.5 h-2.5" strokeWidth={2} /></button>
+                  : <ChevronDown aria-hidden="true" className={`w-2.5 h-2.5 transition-transform ${showCpFilter ? 'rotate-180' : ''}`} strokeWidth={2} />
+                }
+              </button>
+              {showCpFilter && (
+                <div className="absolute left-0 top-full mt-1 bg-white dark:bg-[var(--color-2)] border border-gray-200 dark:border-[var(--border)] rounded-xl shadow-xl overflow-hidden z-40 dropdown-enter w-48">
+                  <div className="p-2">
+                    <input
+                      type="text"
+                      placeholder="Search…"
+                      aria-label="Search counterparties"
+                      value={cpSearch}
+                      onChange={e => setCpSearch(e.target.value)}
+                      className="w-full text-2xs bg-gray-50 dark:bg-[var(--surface-3)] border border-gray-200 dark:border-[var(--border)] rounded-md px-2 py-1 text-gray-700 dark:text-gray-200 focus:outline-none focus:ring-1 focus:ring-[var(--color-700)]"
+                      autoFocus
+                    />
+                  </div>
+                  <div className="max-h-48 overflow-y-auto pb-1">
+                    {allCounterparties.filter(cp => cp.toLowerCase().includes(cpSearch.toLowerCase())).map(cp => (
+                      <button
+                        key={cp}
+                        onClick={() => { setCpFilter(prev => { const next = new Set(prev); next.has(cp) ? next.delete(cp) : next.add(cp); return next; }); }}
+                        className="w-full flex items-center gap-2 px-3 py-1.5 text-2xs hover-item transition-colors text-left"
+                      >
+                        <span className={`w-3.5 h-3.5 rounded border flex-shrink-0 flex items-center justify-center ${cpFilter.has(cp) ? 'bg-[var(--color-700)] border-[var(--color-700)] dark:bg-[var(--color-300)] dark:border-[var(--color-300)]' : 'border-gray-300 dark:border-gray-600'}`}>
+                          {cpFilter.has(cp) && <Check aria-hidden="true" className="w-2.5 h-2.5 text-white dark:text-gray-900" strokeWidth={3} />}
+                        </span>
+                        <span className="text-gray-700 dark:text-gray-200 truncate">{cp}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Compact batch table */}
+          <div
+            ref={listRef}
+            role="listbox"
+            aria-label="Batch list"
+            tabIndex={0}
+            className="flex-1 overflow-y-auto focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--color-700)]"
+            onKeyDown={handleKeyDown}
+          >
+            {detailFilteredBatches.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-10 text-center gap-2">
+                <Search aria-hidden="true" className="w-6 h-6 text-gray-300 dark:text-gray-600" strokeWidth={1.5} />
+                <p className="text-xs text-gray-400 dark:text-gray-500">No batches found</p>
+                <button onClick={() => { setListSearch(''); setDatePreset('all'); setCustomFrom(''); setCustomTo(''); setStatusFilter(new Set()); setShowArchived(false); setCpFilter(new Set()); }} className="text-2xs text-[var(--color-700)] dark:text-[var(--color-300)] hover:underline">Clear filters</button>
+              </div>
+            ) : (
+              <table className="w-full text-xs">
+                <thead className="sticky-thead">
+                  <tr>
+                    <th className="table-compact pl-2 text-left text-[10px] text-gray-400 dark:text-gray-500 font-medium uppercase tracking-wide w-full">Counterparty</th>
+                    <th className="table-compact pr-2 text-left text-[10px] text-gray-400 dark:text-gray-500 font-medium uppercase tracking-wide whitespace-nowrap">Status</th>
+                    <th className="table-compact text-right text-[10px] text-gray-400 dark:text-gray-500 font-medium uppercase tracking-wide whitespace-nowrap">Net</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {detailFilteredBatches.map((batch, i) => {
+                    const isSelected = batch.id === selectedId;
+                    const isFocused = i === focusedIndex;
+                    const bDeliver = batch.deliverObligations.reduce((s, o) => s + o.amountUsd, 0);
+                    const bReceive = batch.receiveObligations.reduce((s, o) => s + o.amountUsd, 0);
+                    const bNet = bReceive - bDeliver;
+                    return (
+                      <tr
+                        key={batch.id}
+                        role="option"
+                        aria-selected={isSelected}
+                        className={`cursor-pointer transition-colors select-none ${
+                          isSelected
+                            ? 'bg-[oklch(0.800_0.012_264)] dark:bg-[oklch(0.268_0.011_264)]'
+                            : 'hover:bg-gray-50 dark:hover:bg-white/5'
+                        } ${isFocused && !isSelected ? 'ring-1 ring-inset ring-gray-300 dark:ring-gray-600' : ''}`}
+                        onClick={() => { setSelectedId(batch.id); setFocusedIndex(i); setShowOverview(false); listRef.current?.focus(); }}
+                      >
+                        <td className="py-1.5 px-2">
+                          <div className="flex items-center gap-1.5">
+                            <CounterpartyAvatar name={batch.counterpartyName} size={18} />
+                            <div className="min-w-0">
+                              <div className={`text-[11px] font-medium truncate leading-tight ${isSelected ? 'text-gray-900 dark:text-gray-100' : 'text-gray-800 dark:text-gray-200'}`}>{batch.counterpartyName}</div>
+                              <div className="text-[10px] text-gray-400 dark:text-gray-500 tabular-nums leading-tight">{fmtCutoff(batch.cutoffTime)}</div>
+                            </div>
+                          </div>
+                        </td>
+                        <td className="py-1.5 px-2">
+                          <StatusBadge status={batch.origin === 'requested' && batch.status === 'Draft' ? 'Pending' : batch.status} pct={getBatchClearedPct(batch)} />
+                        </td>
+                        <td className="py-1.5 px-2 text-right text-[10px] whitespace-nowrap">
+                          <span className={bNet >= 0 ? 'text-[var(--positive)]' : 'text-[var(--negative)]'}>
+                            {bNet >= 0 ? '+' : '−'}{fmtUsdCompact(Math.abs(bNet))}
+                          </span>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            )}
+          </div>
+        </div>
+
+        {/* ── RIGHT PANEL: landing or batch detail ─────────────────── */}
+        <div className="flex-1 overflow-hidden">
+          {showOverview ? (
+            <PostedTotalOverview batches={batches} />
+          ) : selectedBatch ? (
+            <BatchDetail batch={selectedBatch} onUpdate={handleBatchUpdate} />
+          ) : (
+            <BatchesLanding
+              filteredBatches={filteredBatches}
+              onSelectBatch={(id) => { setSelectedId(id); setFocusedIndex(filteredBatches.findIndex(b => b.id === id)); }}
+            />
+          )}
         </div>
       </div>
 
-      {/* ── RIGHT PANEL: overview or batch detail (70%) ──────────────── */}
-      <div className="flex-1 overflow-hidden">
-        {showOverview ? (
-          <PostedTotalOverview batches={batches} />
-        ) : selectedBatch ? (
-          <BatchDetail batch={selectedBatch} onUpdate={handleBatchUpdate} />
-        ) : (
-          <div className="flex flex-col items-center justify-center h-full gap-3 text-gray-400 dark:text-gray-500">
-            <Calendar aria-hidden="true" className="w-8 h-8 opacity-40" strokeWidth={1.5} />
-            <p className="text-sm">No batches match this filter</p>
-            <button onClick={() => { setDatePreset('all'); setCustomFrom(''); setCustomTo(''); setStatusFilter(new Set()); setShowArchived(false); }} className="text-xs text-[var(--color-700)] dark:text-[var(--color-300)] hover:underline">Clear filter</button>
-          </div>
-        )}
-      </div>
-
-      {/* ── Modals ───────────────────────────────────────────────────── */}
-      {showCreate && (
-        <CreateBatchModal onConfirm={handleCreateConfirm} onClose={() => setShowCreate(false)} />
-      )}
+      {/* ── Modals ────────────────────────────────────────────────── */}
       {showImport && (
         <ImportModal onConfirm={handleImportConfirm} onClose={() => setShowImport(false)} />
       )}
