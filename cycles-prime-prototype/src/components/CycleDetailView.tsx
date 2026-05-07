@@ -116,8 +116,7 @@ function DimensionTable({ rows, type, onSettle }: DimensionTableProps) {
   };
 
   return (
-    <div className="rounded-2xl shadow-md overflow-hidden">
-      <table className="w-full table-compact text-xs">
+    <table className="w-full table-compact text-xs">
         <thead>
           <tr className="bg-gray-50 dark:bg-[var(--color-1)] text-gray-500 dark:text-gray-400 border-b border-gray-100 dark:border-[var(--border)] text-[10px] uppercase tracking-wide">
             <th className="text-left pl-3 pr-2 py-2 font-medium">
@@ -202,7 +201,6 @@ function DimensionTable({ rows, type, onSettle }: DimensionTableProps) {
           })}
         </tbody>
       </table>
-    </div>
   );
 }
 

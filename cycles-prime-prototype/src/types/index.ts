@@ -1,4 +1,4 @@
-export type BatchStatus = 'Draft' | 'Pending' | 'Ascertained' | 'Cleared' | 'Rejected' | 'Cancelled' | 'Deleted' | 'Revoked';
+export type BatchStatus = 'Draft' | 'Pending' | 'Approved' | 'Cleared' | 'Rejected' | 'Cancelled' | 'Deleted' | 'Revoked';
 export type CycleStatus = 'Scheduled' | 'Completed';
 
 export interface Obligation {
@@ -9,6 +9,8 @@ export interface Obligation {
   amountUsd: number;
   clearedUsd: number;
   remainingUsd: number;
+  /** Optional external reference number from imported CSV (e.g. trade ID, ticket ref) */
+  refNumber?: string;
 }
 
 export type ActivityEventType = 'created' | 'status_change' | 'obligation_edit' | 'cycle_included' | 'settlement';
@@ -49,6 +51,12 @@ export interface Cycle {
   totalUsd: number;
   clearedUsd: number;
   remainingUsd: number;
+  deliverTotalUsd: number;
+  deliverClearedUsd: number;
+  deliverRemainingUsd: number;
+  receiveTotalUsd: number;
+  receiveClearedUsd: number;
+  receiveRemainingUsd: number;
   percentCleared: number;
   status: CycleStatus;
   obligationsByAsset: ObligationByDimension[];

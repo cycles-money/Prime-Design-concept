@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, KeyboardEvent } from 'react';
 import NumberFlow, { NumberFlowGroup } from '@number-flow/react';
 import { mockCycles } from '../data/mockData';
-import type { Cycle } from '../types';
+import type { Cycle, SettlementTarget } from '../types';
 import {
   fmtUsdFull,
   fmtUsdCompact,
@@ -10,7 +10,9 @@ import {
   getCountdownParts,
 } from '../utils/formatters';
 import CounterpartyClearingPanel from './CounterpartyClearingPanel';
+import LinkSettlementModal from './LinkSettlementModal';
 import { CryptoIcon, getCryptoIconUrl, CRYPTO_COLORS } from './CryptoIcon';
+import { CounterpartyAvatar } from './CounterpartyAvatar';
 import {
   BarChart,
   Bar,
@@ -24,7 +26,10 @@ import {
   Cell,
 } from 'recharts';
 import { useDarkMode } from '../context/DarkModeContext';
-import { Calendar, Timer, History, TrendingUp, Users, RefreshCw, Check, Download } from 'lucide-react';
+import {
+  Calendar, Timer, History, TrendingUp, Users, RefreshCw, Check, Download,
+  ArrowUp, ArrowDown, ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, Search,
+} from 'lucide-react';
 
 // ── Status badge ──────────────────────────────────────────────────────────────
 
@@ -70,11 +75,11 @@ function UpcomingCycleItem({
 }) {
   const [parts, setParts] = useState(() => getCountdownParts(cycle.scheduledHourUtc));
   useEffect(() => {
-    const id = setInterval(() => setParts(getCountdownParts(cycle.scheduledHourUtc)), 1000);
+    const id = setInterval(() => setParts(getCountdownParts(cycle.scheduledHourUtc)), 60_000);
     return () => clearInterval(id);
   }, [cycle.scheduledHourUtc]);
 
-  const ELIGIBLE = new Set(['Ascertained', 'Cleared']);
+  const ELIGIBLE = new Set(['Approved', 'Cleared']);
   const eligibleCount = batches.filter((b) => ELIGIBLE.has(b.status)).length;
   const isUrgent  = parseInt(parts.hh) === 0 && parseInt(parts.mm) < 5;
   const timeColor = isUrgent ? 'text-red-400' : 'text-amber-500 dark:text-amber-400';
@@ -84,14 +89,14 @@ function UpcomingCycleItem({
       onClick={onClick}
       className={`w-full text-left px-3 py-2.5 rounded-lg transition-colors
         ${isSelected
-          ? 'bg-[var(--color-50)] dark:bg-[var(--color-950)]/30'
+          ? 'bg-[oklch(0.910_0.005_264)] dark:bg-[oklch(0.268_0.011_264)]'
           : 'hover:bg-gray-50 dark:hover:bg-white/5'
         }`}
     >
       <div className="flex items-center justify-between mb-1.5">
         <div className="flex items-center gap-2">
           <Timer className="w-3.5 h-3.5 text-amber-500 dark:text-amber-400 flex-shrink-0" strokeWidth={2} />
-          <span className="text-xs font-semibold text-gray-800 dark:text-gray-100">Next cycle</span>
+          <span className="text-xs font-semibold text-gray-800 dark:text-gray-100">Upcoming cycle</span>
         </div>
         <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-400 border border-amber-200 dark:border-amber-800 font-medium">
           Scheduled
@@ -111,12 +116,10 @@ function UpcomingCycleItem({
 
         {/* Countdown */}
         <NumberFlowGroup>
-          <span className={`font-mono text-base font-bold tabular-nums ${timeColor}`}>
+          <span className={`text-base font-bold tabular-nums ${timeColor}`}>
             <NumberFlow trend={-1} value={parseInt(parts.hh)} format={{ minimumIntegerDigits: 2 }} />
             <span className="opacity-60 mx-0.5">:</span>
             <NumberFlow trend={-1} value={parseInt(parts.mm)} digits={{ 1: { max: 5 } }} format={{ minimumIntegerDigits: 2 }} />
-            <span className="opacity-60 mx-0.5">:</span>
-            <NumberFlow trend={-1} value={parseInt(parts.ss)} digits={{ 1: { max: 5 } }} format={{ minimumIntegerDigits: 2 }} />
           </span>
         </NumberFlowGroup>
       </div>
@@ -142,20 +145,34 @@ function PastCycleItem({
       onClick={onClick}
       className={`w-full text-left px-3 py-2.5 rounded-lg transition-colors select-none
         ${isSelected
-          ? 'bg-[var(--color-50)] dark:bg-[var(--color-950)]/30'
+          ? 'bg-[oklch(0.910_0.005_264)] dark:bg-[oklch(0.268_0.011_264)]'
           : 'hover:bg-gray-50 dark:hover:bg-white/5'
         }
-        ${isFocused && !isSelected ? 'ring-1 ring-[var(--color-300)] dark:ring-[var(--color-800)]' : ''}
+        ${isFocused && !isSelected ? 'ring-1 ring-gray-300 dark:ring-gray-600' : ''}
       `}
     >
-      <div className="flex items-center justify-between mb-1.5">
+      <div className="flex items-start justify-between">
         <div>
-          <span className="text-xs font-semibold text-gray-700 dark:text-gray-200">{fmtDate(cycle.date)}</span>
-          <span className="text-[10px] text-gray-400 dark:text-gray-500 ml-1.5">{cycle.scheduledTime}</span>
+          <p className="text-xs font-semibold text-gray-700 dark:text-gray-200">{fmtDate(cycle.date)}</p>
+          <p className="text-[10px] text-gray-400 dark:text-gray-500 mt-0.5">{cycle.scheduledTime}</p>
         </div>
-        <span className="text-xs font-mono tabular-nums text-gray-600 dark:text-gray-300">{fmtUsdCompact(cycle.totalUsd)}</span>
+        <div className="text-right space-y-0.5">
+          <p className="flex items-center justify-end gap-1 text-[10px] tabular-nums text-[var(--negative)] font-medium">
+            <ArrowUp aria-hidden="true" className="w-3 h-3 flex-shrink-0" strokeWidth={2} />
+            − {fmtUsdCompact(cycle.deliverClearedUsd)}
+            <span className="text-gray-400 dark:text-gray-500 font-normal">
+              {cycle.deliverTotalUsd > 0 ? `${Math.round((cycle.deliverClearedUsd / cycle.deliverTotalUsd) * 100)}%` : '—'}
+            </span>
+          </p>
+          <p className="flex items-center justify-end gap-1 text-[10px] tabular-nums text-[var(--positive)] font-medium">
+            <ArrowDown aria-hidden="true" className="w-3 h-3 flex-shrink-0" strokeWidth={2} />
+            − {fmtUsdCompact(cycle.receiveClearedUsd)}
+            <span className="text-gray-400 dark:text-gray-500 font-normal">
+              {cycle.receiveTotalUsd > 0 ? `${Math.round((cycle.receiveClearedUsd / cycle.receiveTotalUsd) * 100)}%` : '—'}
+            </span>
+          </p>
+        </div>
       </div>
-      <MiniBar pct={cycle.percentCleared} />
     </button>
   );
 }
@@ -171,12 +188,33 @@ function TricklingPanel({
 }) {
   const [parts, setParts] = useState(() => getCountdownParts(cycle.scheduledHourUtc));
   const [breakdown, setBreakdown] = useState<'asset' | 'batches'>('asset');
+  const [tz, setTz] = useState<'utc' | 'local'>('local');
+  const [expandedAssets, setExpandedAssets] = useState<Set<string>>(new Set());
   useEffect(() => {
-    const id = setInterval(() => setParts(getCountdownParts(cycle.scheduledHourUtc)), 1000);
+    const id = setInterval(() => setParts(getCountdownParts(cycle.scheduledHourUtc)), 60_000);
     return () => clearInterval(id);
   }, [cycle.scheduledHourUtc]);
 
-  const ELIGIBLE_STATUSES = new Set(['Ascertained', 'Cleared']);
+  const scheduledDate = new Date(
+    `${cycle.date}T${String(cycle.scheduledHourUtc).padStart(2, '0')}:00:00Z`
+  );
+
+  const schedDisplay = tz === 'utc'
+    ? {
+        time: `${String(scheduledDate.getUTCHours()).padStart(2, '0')}:${String(scheduledDate.getUTCMinutes()).padStart(2, '0')}`,
+        tzLabel: 'UTC',
+        dateStr: scheduledDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' }),
+      }
+    : {
+        time: `${String(scheduledDate.getHours()).padStart(2, '0')}:${String(scheduledDate.getMinutes()).padStart(2, '0')}`,
+        tzLabel:
+          Intl.DateTimeFormat('en-US', { timeZoneName: 'short' })
+            .formatToParts(scheduledDate)
+            .find((p) => p.type === 'timeZoneName')?.value ?? 'Local',
+        dateStr: scheduledDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
+      };
+
+  const ELIGIBLE_STATUSES = new Set(['Approved', 'Cleared']);
   const eligible   = batches.filter((b) => ELIGIBLE_STATUSES.has(b.status));
   const notReady   = batches.filter((b) => !ELIGIBLE_STATUSES.has(b.status));
   const eligibleUsd = eligible.reduce((s, b) => s + b.totalUsd, 0);
@@ -184,48 +222,70 @@ function TricklingPanel({
   const pct = totalUsd > 0 ? Math.round((eligibleUsd / totalUsd) * 100) : 0;
 
   const isUrgent  = parseInt(parts.hh) === 0 && parseInt(parts.mm) < 5;
-  const isWarning = parseInt(parts.hh) === 0;
-  const timeColor = isUrgent ? 'text-red-400' : isWarning ? 'text-amber-400' : 'text-[var(--color-300)]';
+  const timeColor = isUrgent ? 'text-red-500 dark:text-red-400' : 'text-amber-600 dark:text-amber-400';
 
   return (
     <div className="h-full overflow-y-auto p-5 space-y-4">
 
-      {/* Countdown hero */}
-      <div className="bg-white dark:bg-[var(--color-2)] rounded-xl border border-gray-100 dark:border-[var(--border)] px-5 py-5 flex items-center justify-between">
-        <div>
-          <p className="text-[10px] text-gray-400 dark:text-gray-500 uppercase tracking-wide font-medium mb-1">Next clearing cycle</p>
-          <p className="text-sm font-semibold text-gray-800 dark:text-gray-200">{fmtDate(cycle.date)} · {cycle.scheduledTime}</p>
-          <p className="text-[10px] text-gray-400 dark:text-gray-500 mt-1">
+      {/* Upcoming cycle hero — side-by-side */}
+      <div className="px-5 pt-3 pb-1">
+        <p className="text-[10px] text-gray-400 dark:text-gray-500 uppercase tracking-wide font-medium mb-3">
+          Upcoming cycle
+        </p>
+        <div className="flex items-start justify-between gap-4">
+
+          {/* Left: scheduled time + UTC/Local toggle */}
+          <div>
+            <div className="flex items-baseline gap-2">
+              <span className="text-4xl font-bold text-gray-800 dark:text-gray-100 tabular-nums">
+                {schedDisplay.time}
+              </span>
+              <span className="text-sm font-medium text-gray-400 dark:text-gray-500">{schedDisplay.tzLabel}</span>
+            </div>
+            <p className="text-sm font-semibold text-gray-600 dark:text-gray-300 mt-0.5">{schedDisplay.dateStr}</p>
+            <div className="flex items-center gap-1 bg-gray-100 dark:bg-[var(--surface-3)] rounded-full p-0.5 mt-2 w-fit">
+              {(['utc', 'local'] as const).map((v) => (
+                <button
+                  key={v}
+                  onClick={() => setTz(v)}
+                  className={`text-[10px] font-medium px-2.5 py-1 rounded-full transition-colors ${
+                    tz === v
+                      ? 'bg-white dark:bg-[var(--color-2)] text-gray-800 dark:text-gray-100 shadow-sm'
+                      : 'text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300'
+                  }`}
+                >
+                  {v === 'utc' ? 'UTC' : 'Local'}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Right: animated HH:MM countdown */}
+          <div className="flex items-baseline gap-2 flex-shrink-0">
+            <span className={`text-xs uppercase tracking-wide font-semibold ${timeColor}`}>In</span>
+            <NumberFlowGroup>
+              <span className={`text-3xl font-bold tabular-nums ${timeColor}`}>
+                <NumberFlow trend={-1} value={parseInt(parts.hh)} format={{ minimumIntegerDigits: 2 }} />
+                <span className="opacity-40 mx-0.5">:</span>
+                <NumberFlow trend={-1} value={parseInt(parts.mm)} digits={{ 1: { max: 5 } }} format={{ minimumIntegerDigits: 2 }} />
+              </span>
+            </NumberFlowGroup>
+          </div>
+
+        </div>
+
+        {/* Eligibility summary */}
+        <div className="border-t border-gray-100 dark:border-[var(--border)] mt-4 pt-2">
+          <p className="text-[10px] text-gray-400 dark:text-gray-500">
             {eligible.length} of {batches.length} batch{batches.length !== 1 ? 'es' : ''} eligible
+            {eligibleUsd > 0 ? ` · ${fmtUsdCompact(eligibleUsd)} eligible` : ''}
           </p>
         </div>
-        <NumberFlowGroup>
-          <div className={`font-mono text-3xl font-bold tabular-nums text-right ${timeColor}`}>
-            <NumberFlow trend={-1} value={parseInt(parts.hh)} format={{ minimumIntegerDigits: 2 }} />
-            <span className="opacity-40 mx-1">:</span>
-            <NumberFlow trend={-1} value={parseInt(parts.mm)} digits={{ 1: { max: 5 } }} format={{ minimumIntegerDigits: 2 }} />
-            <span className="opacity-40 mx-1">:</span>
-            <NumberFlow trend={-1} value={parseInt(parts.ss)} digits={{ 1: { max: 5 } }} format={{ minimumIntegerDigits: 2 }} />
-          </div>
-        </NumberFlowGroup>
       </div>
 
-      {/* Eligible volume bar */}
-      <div className="bg-white dark:bg-[var(--color-2)] rounded-xl border border-gray-100 dark:border-[var(--border)] px-5 py-4">
-        <div className="flex items-center justify-between mb-2">
-          <p className="text-[10px] text-gray-400 dark:text-gray-500 uppercase tracking-wide font-medium">Eligible volume</p>
-          <span className="text-xs font-mono tabular-nums text-[var(--positive)] font-semibold">{fmtUsdFull(eligibleUsd)}</span>
-        </div>
-        <div className="cleared-bar">
-          <div className="cleared-bar-fill" style={{ width: `${pct}%` }} />
-        </div>
-        <p className="text-[10px] text-gray-400 dark:text-gray-500 mt-1.5">
-          {pct}% of total portfolio ({fmtUsdCompact(totalUsd)}) ready for netting
-        </p>
-      </div>
 
       {/* Batch readiness */}
-      <div className="bg-white dark:bg-[var(--color-2)] rounded-xl border border-gray-100 dark:border-[var(--border)] overflow-hidden">
+      <div className="bg-white dark:bg-[var(--color-2)] rounded-xl shadow-sm dark:shadow-none dark:border dark:border-[var(--border)] overflow-hidden">
         <div className="px-5 py-3.5 border-b border-gray-100 dark:border-[var(--border)] flex items-center justify-between gap-2">
           <div className="flex items-center gap-2">
             <p className="text-xs font-semibold text-gray-700 dark:text-gray-200">Batch readiness</p>
@@ -270,11 +330,16 @@ function TricklingPanel({
                 return (
                   <tr
                     key={b.id}
-                    className="group hover-row border-b border-gray-50 dark:border-[var(--border)] last:border-b-0 transition-colors cursor-pointer"
+                    className="group hover-row dark:border-b dark:border-[var(--border)] last:border-b-0 transition-colors cursor-pointer"
                     onClick={() => window.dispatchEvent(new CustomEvent('navigate-to-batch', { detail: b.id }))}
                   >
-                    <td className="pl-4 pr-2 py-2 font-mono text-[10px] text-gray-400 dark:text-gray-500 whitespace-nowrap">{b.id}</td>
-                    <td className="px-2 py-2 font-medium text-gray-700 dark:text-gray-200">{b.counterpartyName}</td>
+                    <td className="pl-4 pr-2 py-2 text-[10px] text-gray-400 dark:text-gray-500 whitespace-nowrap">{b.id}</td>
+                    <td className="px-2 py-2">
+                      <div className="flex items-center gap-1.5">
+                        <CounterpartyAvatar name={b.counterpartyName} size={18} />
+                        <span className="font-medium text-gray-700 dark:text-gray-200">{b.counterpartyName}</span>
+                      </div>
+                    </td>
                     <td className="pr-4 py-2 text-right">
                       {isEligible ? (
                         <span className="inline-flex items-center gap-1 text-[10px] font-medium text-[var(--positive)]">
@@ -297,18 +362,27 @@ function TricklingPanel({
           type ObRow = { id: string; counterparty: string; side: 'deliver' | 'receive'; posted: number; postedUsd: number };
           type AssetGrp = { asset: string; rows: ObRow[]; subtotalPosted: number; subtotalUsd: number };
           const groupMap = new Map<string, AssetGrp>();
+          // Per-(cp, asset, side) collision counter so display IDs stay stable when there's no duplication.
+          const cpAssetCount = new Map<string, number>();
+          const nextSuffix = (key: string) => {
+            const n = cpAssetCount.get(key) ?? 0;
+            cpAssetCount.set(key, n + 1);
+            return n === 0 ? '' : `_${n + 1}`;
+          };
           batches.forEach((b) => {
             const cp = b.counterpartyName.replace(/\s/g, '');
             b.deliverObligations.forEach((ob) => {
               const g = groupMap.get(ob.asset) ?? { asset: ob.asset, rows: [], subtotalPosted: 0, subtotalUsd: 0 };
-              g.rows.push({ id: `Id_MM1_${cp}_${ob.asset}`, counterparty: b.counterpartyName, side: 'deliver', posted: ob.amountAsset, postedUsd: ob.amountUsd });
+              const suffix = nextSuffix(`d_${cp}_${ob.asset}`);
+              g.rows.push({ id: `Id_MM1_${cp}_${ob.asset}${suffix}`, counterparty: b.counterpartyName, side: 'deliver', posted: ob.amountAsset, postedUsd: ob.amountUsd });
               g.subtotalPosted += ob.amountAsset;
               g.subtotalUsd += ob.amountUsd;
               groupMap.set(ob.asset, g);
             });
             b.receiveObligations.forEach((ob) => {
               const g = groupMap.get(ob.asset) ?? { asset: ob.asset, rows: [], subtotalPosted: 0, subtotalUsd: 0 };
-              g.rows.push({ id: `Id_${cp}_MM1_${ob.asset}`, counterparty: b.counterpartyName, side: 'receive', posted: ob.amountAsset, postedUsd: ob.amountUsd });
+              const suffix = nextSuffix(`r_${cp}_${ob.asset}`);
+              g.rows.push({ id: `Id_${cp}_MM1_${ob.asset}${suffix}`, counterparty: b.counterpartyName, side: 'receive', posted: ob.amountAsset, postedUsd: ob.amountUsd });
               g.subtotalPosted += ob.amountAsset;
               g.subtotalUsd += ob.amountUsd;
               groupMap.set(ob.asset, g);
@@ -317,78 +391,110 @@ function TricklingPanel({
           const assetGroups = [...groupMap.values()].sort((a, b) => b.subtotalUsd - a.subtotalUsd);
           const grandTotalUsd = assetGroups.reduce((s, g) => s + g.subtotalUsd, 0);
           return (
-            <div className="overflow-x-auto">
-              <table className="w-full text-xs">
-                <thead>
-                  <tr className="bg-gray-50 dark:bg-[var(--color-1)] border-b border-gray-100 dark:border-[var(--border)] text-[10px] uppercase tracking-wide text-gray-500 dark:text-gray-400">
-                    <th className="text-left pl-4 pr-2 py-2 font-medium">ID</th>
-                    <th className="text-left px-2 py-2 font-medium">Counterparty</th>
-                    <th className="text-right px-2 py-2 font-medium">Posted</th>
-                    <th className="text-right px-2 py-2 font-medium">Delivered by Clearing</th>
-                    <th className="text-right px-2 py-2 font-medium">Received by Clearing</th>
-                    <th className="text-right px-2 py-2 font-medium">Remaining to Settle</th>
-                    <th className="text-right px-2 py-2 font-medium">Cleared (%)</th>
-                    <th className="text-right pr-4 py-2 font-medium">Cleared (USD)</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {assetGroups.map((group) => (
-                    <React.Fragment key={group.asset}>
-                      <tr className="bg-gray-50/60 dark:bg-[var(--color-1)]/40">
-                        <td colSpan={8} className="pl-4 py-1.5">
-                          <span className="flex items-center gap-1.5 text-[10px] font-bold text-gray-700 dark:text-gray-200 uppercase tracking-wide">
-                            <CryptoIcon symbol={group.asset} size={12} />
-                            {group.asset}
-                          </span>
-                        </td>
-                      </tr>
-                      {group.rows.map((row) => (
-                        <tr key={row.id} className="border-b border-gray-50 dark:border-[var(--border)] hover:bg-gray-50/50 dark:hover:bg-[var(--surface-2)]">
-                          <td className="pl-4 pr-2 py-1.5 font-mono text-[10px] text-gray-400 dark:text-gray-500">{row.id}</td>
-                          <td className={`px-2 py-1.5 text-xs font-semibold ${row.side === 'deliver' ? 'text-red-500 dark:text-red-400' : 'text-[var(--positive)]'}`}>
-                            {row.counterparty}
-                          </td>
-                          <td className="px-2 py-1.5 text-right tabular-nums text-gray-600 dark:text-gray-300">{fmtAssetAmt(row.posted, group.asset)}</td>
-                          <td className="px-2 py-1.5 text-right tabular-nums"><span className="text-gray-300 dark:text-gray-600">—</span></td>
-                          <td className="px-2 py-1.5 text-right tabular-nums"><span className="text-gray-300 dark:text-gray-600">—</span></td>
-                          <td className="px-2 py-1.5 text-right tabular-nums">
-                            <span className="text-red-500 dark:text-red-400">{fmtAssetAmt(row.posted, group.asset)}</span>
-                          </td>
-                          <td className="px-2 py-1.5 text-right tabular-nums text-gray-600 dark:text-gray-300">0.00%</td>
-                          <td className="px-2 pr-4 py-1.5 text-right tabular-nums text-gray-300 dark:text-gray-600">—</td>
-                        </tr>
-                      ))}
-                      <tr className="bg-gray-50/80 dark:bg-[var(--color-1)]/30 border-b border-gray-100 dark:border-[var(--border)]">
-                        <td className="pl-4 pr-2 py-1"></td>
-                        <td className="px-2 py-1"></td>
-                        <td className="px-2 py-1 text-right tabular-nums text-[10px] font-medium text-gray-600 dark:text-gray-300">{fmtAssetAmt(group.subtotalPosted, group.asset)}</td>
-                        <td className="px-2 py-1"></td>
-                        <td className="px-2 py-1"></td>
-                        <td className="px-2 py-1 text-right tabular-nums text-[10px] font-medium text-red-400">{fmtAssetAmt(group.subtotalPosted, group.asset)}</td>
-                        <td className="px-2 py-1"></td>
-                        <td className="px-2 pr-4 py-1 text-right tabular-nums text-[10px] font-medium text-gray-400 dark:text-gray-500">{fmtUsdCompact(group.subtotalUsd)}</td>
-                      </tr>
-                    </React.Fragment>
-                  ))}
-                </tbody>
-                <tfoot>
-                  <tr className="border-t-2 border-gray-200 dark:border-[var(--border)] bg-gray-50 dark:bg-[var(--color-1)]">
-                    <td colSpan={7} className="pl-4 py-2 text-xs font-semibold text-gray-700 dark:text-gray-200">Grand Total</td>
-                    <td className="pr-4 py-2 text-right tabular-nums text-xs font-semibold text-gray-700 dark:text-gray-200">{fmtUsdCompact(grandTotalUsd)}</td>
-                  </tr>
-                </tfoot>
-              </table>
+            <div className="p-4 space-y-2">
+              {assetGroups.length === 0 ? (
+                <p className="text-center text-[10px] text-gray-400 dark:text-gray-500 py-6">No assets posted.</p>
+              ) : (
+                <>
+                  {assetGroups.map((group) => {
+                    const isExpanded = expandedAssets.has(group.asset);
+                    return (
+                      <div key={group.asset} className="border border-gray-200 dark:border-[var(--border)] rounded-xl overflow-hidden">
+                        <button
+                          className="w-full flex items-center gap-3 px-4 py-3 bg-white dark:bg-[var(--surface-1)] hover:bg-gray-50 dark:hover:bg-[var(--surface-2)] transition-colors text-left"
+                          onClick={() =>
+                            setExpandedAssets((prev) => {
+                              const next = new Set(prev);
+                              if (next.has(group.asset)) next.delete(group.asset); else next.add(group.asset);
+                              return next;
+                            })
+                          }
+                          aria-expanded={isExpanded}
+                        >
+                          <CryptoIcon symbol={group.asset} size={32} />
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-semibold text-gray-800 dark:text-gray-100">{group.asset}</p>
+                            <p className="text-[10px] text-gray-400 dark:text-gray-500 mt-0.5">
+                              {group.rows.length} obligation{group.rows.length !== 1 ? 's' : ''}{' '}
+                              · {fmtAssetAmt(group.subtotalPosted, group.asset)} posted{' '}
+                              · {fmtUsdCompact(group.subtotalUsd)} total
+                            </p>
+                          </div>
+                          {isExpanded
+                            ? <ChevronDown size={14} className="text-gray-400 dark:text-gray-500 flex-shrink-0" aria-hidden />
+                            : <ChevronRight size={14} className="text-gray-400 dark:text-gray-500 flex-shrink-0" aria-hidden />
+                          }
+                        </button>
+
+                        {isExpanded && (
+                          <table className="w-full text-xs">
+                            <thead>
+                              <tr className="bg-gray-50 dark:bg-[var(--color-1)] border-b border-gray-100 dark:border-[var(--border)] text-[10px] uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                                <th className="text-left pl-4 pr-2 py-2 font-medium">ID</th>
+                                <th className="text-left px-2 py-2 font-medium">Counterparty</th>
+                                <th className="text-right px-2 py-2 font-medium">Posted</th>
+                                <th className="text-right px-2 py-2 font-medium">Delivered</th>
+                                <th className="text-right px-2 py-2 font-medium">Received</th>
+                                <th className="text-right px-2 py-2 font-medium">Remaining</th>
+                                <th className="text-right px-2 py-2 font-medium">Cleared (%)</th>
+                                <th className="text-right pr-4 py-2 font-medium">Cleared (USD)</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {group.rows.map((row, idx) => (
+                                <tr key={row.id} className={idx % 2 === 1 ? 'bg-gray-50/60 dark:bg-[var(--surface-2)]/30' : ''}>
+                                  <td className="pl-4 pr-2 py-1.5 text-[10px] text-gray-400 dark:text-gray-500">{row.id}</td>
+                                  <td className="px-2 py-1.5">
+                                    <div className="flex items-center gap-1.5">
+                                      <CounterpartyAvatar name={row.counterparty} size={20} />
+                                      <span className={`text-xs font-semibold ${row.side === 'deliver' ? 'text-red-500 dark:text-red-400' : 'text-[var(--positive)]'}`}>
+                                        {row.counterparty}
+                                      </span>
+                                    </div>
+                                  </td>
+                                  <td className="px-2 py-1.5 text-right tabular-nums text-gray-800 dark:text-gray-100">{fmtAssetAmt(row.posted, group.asset)}</td>
+                                  <td className="px-2 py-1.5 text-right tabular-nums"><span className="text-gray-300 dark:text-gray-600">—</span></td>
+                                  <td className="px-2 py-1.5 text-right tabular-nums"><span className="text-gray-300 dark:text-gray-600">—</span></td>
+                                  <td className="px-2 py-1.5 text-right tabular-nums text-gray-800 dark:text-gray-100">{fmtAssetAmt(row.posted, group.asset)}</td>
+                                  <td className="px-2 py-1.5 text-right tabular-nums text-gray-600 dark:text-gray-300">0.00%</td>
+                                  <td className="px-2 pr-4 py-1.5 text-right tabular-nums text-gray-300 dark:text-gray-600">—</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                            <tfoot>
+                              <tr className="bg-gray-50/80 dark:bg-[var(--color-1)]/30 border-t border-gray-100 dark:border-[var(--border)]">
+                                <td colSpan={2} className="pl-4 pr-2 py-1.5 text-[10px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">Subtotal</td>
+                                <td className="px-2 py-1.5 text-right tabular-nums text-[10px] font-medium text-gray-800 dark:text-gray-100">{fmtAssetAmt(group.subtotalPosted, group.asset)}</td>
+                                <td colSpan={2} />
+                                <td className="px-2 py-1.5 text-right tabular-nums text-[10px] font-medium text-gray-800 dark:text-gray-100">{fmtAssetAmt(group.subtotalPosted, group.asset)}</td>
+                                <td />
+                                <td className="px-2 pr-4 py-1.5 text-right tabular-nums text-[10px] font-medium text-gray-500 dark:text-gray-400">{fmtUsdCompact(group.subtotalUsd)}</td>
+                              </tr>
+                            </tfoot>
+                          </table>
+                        )}
+                      </div>
+                    );
+                  })}
+
+                  {/* Grand total */}
+                  <div className="flex items-center justify-between px-4 py-2.5 mt-1 border-t-2 border-gray-200 dark:border-[var(--border)]">
+                    <span className="text-xs font-semibold text-gray-700 dark:text-gray-200 uppercase tracking-wide">Grand total</span>
+                    <span className="text-xs font-semibold tabular-nums text-gray-700 dark:text-gray-200">{fmtUsdCompact(grandTotalUsd)}</span>
+                  </div>
+                </>
+              )}
             </div>
           );
         })()}
       </div>
 
       {/* Eligibility criteria */}
-      <div className="bg-white dark:bg-[var(--color-2)] rounded-xl border border-gray-100 dark:border-[var(--border)] px-4 py-3">
+      <div className="bg-white dark:bg-[var(--color-2)] rounded-xl shadow-sm dark:shadow-none dark:border dark:border-[var(--border)] px-4 py-3">
         <p className="text-xs font-semibold text-gray-700 dark:text-gray-200 mb-2">Eligibility criteria</p>
         <ul className="space-y-1.5">
           {[
-            { met: eligible.length > 0,                label: `${eligible.length} batch${eligible.length !== 1 ? 'es' : ''} ascertained or included` },
+            { met: eligible.length > 0,                label: `${eligible.length} batch${eligible.length !== 1 ? 'es' : ''} approved or included` },
             { met: notReady.length === 0,              label: 'All batches ready (none in Draft/Pending)' },
           ].map(({ met, label }) => (
             <li key={label} className="flex items-center gap-2 text-[10px]">
@@ -459,7 +565,7 @@ export function AccountOverview({
           { icon: <RefreshCw size={14} className="text-[var(--color-300)]" />, label: 'Total cycles', value: String(pastCycles.length) },
           { icon: <Users size={14} className="text-[var(--color-300)]" />, label: 'Counterparties', value: String(allCps.size) },
         ].map(({ icon, label, value }) => (
-          <div key={label} className="bg-white dark:bg-[var(--color-2)] rounded-xl border border-gray-100 dark:border-[var(--border)] px-5 py-4">
+          <div key={label} className="bg-white dark:bg-[var(--color-2)] rounded-xl shadow-sm dark:shadow-none dark:border dark:border-[var(--border)] px-5 py-4">
             <div className="flex items-center gap-1.5 mb-2">{icon}<span className="text-[10px] text-gray-400 dark:text-gray-500 uppercase tracking-wide font-medium">{label}</span></div>
             <span className="text-2xl font-bold text-gray-900 dark:text-gray-100 tabular-nums">{value}</span>
           </div>
@@ -467,7 +573,7 @@ export function AccountOverview({
       </div>
 
       {/* Volume cleared total */}
-      <div className="bg-white dark:bg-[var(--color-2)] rounded-xl border border-gray-100 dark:border-[var(--border)] px-5 py-4">
+      <div className="bg-white dark:bg-[var(--color-2)] rounded-xl shadow-sm dark:shadow-none dark:border dark:border-[var(--border)] px-5 py-4">
         <p className="text-[10px] text-gray-400 dark:text-gray-500 uppercase tracking-wide font-medium mb-1">Total volume cleared</p>
         <p className="text-xl font-bold text-[var(--positive)] tabular-nums">{fmtUsdFull(totalCleared)}</p>
         <p className="text-[10px] text-gray-400 dark:text-gray-500 tabular-nums mt-1">of {fmtUsdFull(totalVolume)} total obligation volume</p>
@@ -477,7 +583,7 @@ export function AccountOverview({
       </div>
 
       {/* Volume bar chart */}
-      <div className="bg-white dark:bg-[var(--color-2)] rounded-xl border border-gray-100 dark:border-[var(--border)] overflow-hidden">
+      <div className="bg-white dark:bg-[var(--color-2)] rounded-xl shadow-sm dark:shadow-none dark:border dark:border-[var(--border)] overflow-hidden">
         <div className="px-5 py-4 border-b border-gray-100 dark:border-[var(--border)]">
           <p className="text-xs font-semibold text-gray-700 dark:text-gray-200">Clearing volume by cycle</p>
           <p className="text-[10px] text-gray-400 dark:text-gray-500 mt-0.5">Last {chartData.length} cycles</p>
@@ -584,7 +690,7 @@ function PreClearingTable({ cycle }: { cycle: Cycle }) {
   const grandTotal = groups.reduce((s, g) => s + g.subtotalUsd, 0);
 
   return (
-    <div className="bg-white dark:bg-[var(--color-2)] rounded-xl border border-gray-100 dark:border-[var(--border)] overflow-hidden">
+    <div className="bg-white dark:bg-[var(--color-2)] rounded-xl shadow-sm dark:shadow-none dark:border dark:border-[var(--border)] overflow-hidden">
       <div className="px-5 py-3.5 border-b border-gray-100 dark:border-[var(--border)]">
         <p className="text-xs font-semibold text-gray-700 dark:text-gray-200">Pre-Clearing Obligations</p>
         <p className="text-[10px] text-gray-400 dark:text-gray-500 mt-0.5">Counterparty in red = deliver · green = receive</p>
@@ -613,10 +719,13 @@ function PreClearingTable({ cycle }: { cycle: Cycle }) {
                   </td>
                 </tr>
                 {group.rows.map((row) => (
-                  <tr key={row.id} className="border-b border-gray-50 dark:border-[var(--border)] hover:bg-gray-50/50 dark:hover:bg-[var(--surface-2)]">
-                    <td className="pl-4 pr-2 py-1.5 font-mono text-[10px] text-gray-400 dark:text-gray-500">{row.id}</td>
-                    <td className={`px-2 py-1.5 text-xs font-semibold ${row.direction === 'deliver' ? 'text-red-500 dark:text-red-400' : 'text-[var(--positive)]'}`}>
-                      {row.counterparty}
+                  <tr key={row.id} className="dark:border-b dark:border-[var(--border)] hover:bg-gray-50/50 dark:hover:bg-[var(--surface-2)]">
+                    <td className="pl-4 pr-2 py-1.5 text-[10px] text-gray-400 dark:text-gray-500">{row.id}</td>
+                    <td className="px-2 py-1.5">
+                      <div className="flex items-center gap-1.5">
+                        <CounterpartyAvatar name={row.counterparty} size={18} />
+                        <span className={`text-xs font-semibold ${row.direction === 'deliver' ? 'text-red-500 dark:text-red-400' : 'text-[var(--positive)]'}`}>{row.counterparty}</span>
+                      </div>
                     </td>
                     <td className="px-2 py-1.5 text-right tabular-nums text-gray-700 dark:text-gray-200">
                       {row.direction === 'deliver' ? fmtAssetAmt(row.assetAmt, group.asset) : ''}
@@ -658,12 +767,28 @@ function PreClearingTable({ cycle }: { cycle: Cycle }) {
 // ── Post-Clearing Table ───────────────────────────────────────────────────────
 
 function PostClearingTable({ cycle, batches }: { cycle: Cycle; batches: import('../types').Batch[] }) {
-  const [breakdown, setBreakdown] = useState<'asset' | 'batches'>('asset');
+  // Compute cleared batches first so it's available to useState initializers
+  const cycleBatches = batches
+    .filter((b) => b.status === 'Cleared')
+    .sort((a, b) => new Date(b.cutoffTime).getTime() - new Date(a.cutoffTime).getTime());
+
+  const [breakdown, setBreakdown] = useState<'asset' | 'batches'>('batches');
+  const [cpSearch, setCpSearch] = useState('');
+  const [expandedBatches, setExpandedBatches] = useState<Set<string>>(
+    () => new Set(cycleBatches.map((b) => b.id))
+  );
+  const [expandedAssets, setExpandedAssets] = useState<Set<string>>(
+    () => new Set(cycle.obligationsByAsset.map((a) => a.name))
+  );
+  const [settlementTarget, setSettlementTarget] = useState<SettlementTarget | null>(null);
+
+  const filteredBatches = cycleBatches.filter((b) =>
+    b.counterpartyName.toLowerCase().includes(cpSearch.toLowerCase())
+  );
+
   const cps = cycle.obligationsByCounterparty.slice(0, 2).map((c) => c.name);
   const cp0 = cps[0] ?? 'AG1';
   const cp1 = cps[1] ?? 'AG2';
-
-  const cycleBatches = batches.filter((b) => b.status === 'Cleared');
 
   type ClearedRow = { id: string; counterparty: string; side: 'deliver' | 'receive'; posted: number; deliveredByClearing: number; receivedByClearing: number; remainingToSettle: number; clearedPct: number; clearedUsd: number };
   type AssetGroup = { asset: string; rows: ClearedRow[]; subtotalPosted: number; subtotalDelivered: number; subtotalReceived: number; subtotalClearedUsd: number };
@@ -712,127 +837,324 @@ function PostClearingTable({ cycle, batches }: { cycle: Cycle; batches: import('
   })();
 
   return (
-    <div className="bg-white dark:bg-[var(--color-2)] rounded-xl border border-gray-100 dark:border-[var(--border)] overflow-hidden">
-      <div className="px-5 py-3.5 border-b border-gray-100 dark:border-[var(--border)] flex items-center justify-between gap-2">
-        <div>
+    <div className="bg-white dark:bg-[var(--color-2)] rounded-2xl shadow-md overflow-hidden">
+      <div className="px-5 py-3.5 border-b border-gray-100 dark:border-[var(--border)] flex items-center justify-between gap-3">
+        <div className="flex-1 min-w-0">
           <p className="text-xs font-semibold text-gray-700 dark:text-gray-200">Cleared Obligations</p>
-          <p className="text-[10px] text-gray-400 dark:text-gray-500 mt-0.5">Delivered in red · Received in green · Remaining in red</p>
+          {breakdown !== 'batches' && (
+            <p className="text-[10px] text-gray-400 dark:text-gray-500 mt-0.5">
+              Direction shown per row — deliver in red, receive in green
+            </p>
+          )}
         </div>
-        <div className="flex items-center gap-1 bg-gray-100 dark:bg-[var(--surface-3)] rounded-full p-0.5 flex-shrink-0">
-          {(['asset', 'batches'] as const).map((v) => (
-            <button
-              key={v}
-              onClick={() => setBreakdown(v)}
-              className={`text-[10px] font-medium px-2.5 py-1 rounded-full transition-colors capitalize ${
-                breakdown === v
-                  ? 'bg-white dark:bg-[var(--color-2)] text-gray-800 dark:text-gray-100 shadow-sm'
-                  : 'text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300'
-              }`}
-            >
-              {v === 'batches' ? 'Batches' : 'Assets'}
-            </button>
-          ))}
+        <div className="flex items-center gap-2 flex-shrink-0">
+          {breakdown === 'batches' && (
+            <div className="flex items-center gap-1.5 bg-gray-50 dark:bg-[var(--surface-1)] border border-gray-200 dark:border-[var(--border)] rounded-lg px-2.5 py-1.5">
+              <Search size={11} className="text-gray-400 dark:text-gray-500 flex-shrink-0" aria-hidden />
+              <input
+                type="text"
+                value={cpSearch}
+                onChange={(e) => setCpSearch(e.target.value)}
+                placeholder="Search counterparty…"
+                className="w-36 bg-transparent text-[11px] text-gray-700 dark:text-gray-200 placeholder-gray-400 dark:placeholder-gray-600 outline-none"
+              />
+            </div>
+          )}
+          {(() => {
+            const allKeys = breakdown === 'batches'
+              ? filteredBatches.map((b) => b.id)
+              : groups.map((g) => g.asset);
+            const expandedSet = breakdown === 'batches' ? expandedBatches : expandedAssets;
+            const allExpanded = allKeys.length > 0 && allKeys.every((k) => expandedSet.has(k));
+            const setExpanded = breakdown === 'batches' ? setExpandedBatches : setExpandedAssets;
+            return (
+              <button
+                onClick={() => setExpanded(allExpanded ? new Set() : new Set(allKeys))}
+                disabled={allKeys.length === 0}
+                aria-label={allExpanded ? 'Collapse all' : 'Expand all'}
+                className="flex items-center gap-1 text-[10px] font-medium text-gray-500 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200 border border-gray-200 dark:border-[var(--border)] hover:border-gray-300 dark:hover:border-gray-500 rounded-full px-2.5 py-1 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                {allExpanded
+                  ? <ChevronsDownUp aria-hidden="true" className="w-3 h-3" strokeWidth={2} />
+                  : <ChevronsUpDown aria-hidden="true" className="w-3 h-3" strokeWidth={2} />}
+                {allExpanded ? 'Collapse all' : 'Expand all'}
+              </button>
+            );
+          })()}
+          <div className="flex items-center gap-1 bg-gray-100 dark:bg-[var(--surface-3)] rounded-full p-0.5">
+            {(['asset', 'batches'] as const).map((v) => (
+              <button
+                key={v}
+                onClick={() => setBreakdown(v)}
+                className={`text-[10px] font-medium px-2.5 py-1 rounded-full transition-colors capitalize ${
+                  breakdown === v
+                    ? 'bg-white dark:bg-[var(--color-2)] text-gray-800 dark:text-gray-100 shadow-sm'
+                    : 'text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300'
+                }`}
+              >
+                {v === 'batches' ? 'Batches' : 'Assets'}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
       <div className="overflow-x-auto">
         {breakdown === 'batches' ? (
-          <table className="w-full text-xs">
-            <thead>
-              <tr className="bg-gray-50 dark:bg-[var(--color-1)] border-b border-gray-100 dark:border-[var(--border)] text-[10px] uppercase tracking-wide text-gray-500 dark:text-gray-400">
-                <th className="text-left pl-4 pr-2 py-2 font-medium">Batch</th>
-                <th className="text-left px-2 py-2 font-medium">Counterparty</th>
-                <th className="text-right px-2 py-2 font-medium">Total</th>
-                <th className="text-right pr-4 py-2 font-medium">Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              {cycleBatches.length === 0 ? (
-                <tr>
-                  <td colSpan={4} className="pl-4 py-6 text-[10px] text-gray-400 dark:text-gray-500 text-center">No cleared batches in this cycle.</td>
-                </tr>
-              ) : cycleBatches.map((b) => (
-                <tr
-                  key={b.id}
-                  className="border-b border-gray-50 dark:border-[var(--border)] last:border-b-0 hover:bg-gray-50/50 dark:hover:bg-[var(--surface-2)] cursor-pointer"
-                  onClick={() => window.dispatchEvent(new CustomEvent('navigate-to-batch', { detail: b.id }))}
-                >
-                  <td className="pl-4 pr-2 py-2 font-mono text-[10px] text-gray-500 dark:text-gray-400">{b.id}</td>
-                  <td className="px-2 py-2 font-medium text-gray-700 dark:text-gray-200">{b.counterpartyName}</td>
-                  <td className="px-2 py-2 text-right tabular-nums text-gray-600 dark:text-gray-300">{fmtUsdFull(b.totalUsd)}</td>
-                  <td className="px-2 pr-4 py-2 text-right">
-                    <span className="inline-block rounded px-1.5 py-0.5 text-[10px] font-medium bg-[var(--color-50)] text-[var(--color-700)] dark:text-[var(--color-300)] border border-[var(--positive)]">
-                      Cleared
-                    </span>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <div className="p-4">
+            {filteredBatches.length === 0 ? (
+              <p className="text-center text-[10px] text-gray-400 dark:text-gray-500 py-6">
+                {cycleBatches.length === 0 ? 'No cleared batches in this cycle.' : 'No results.'}
+              </p>
+            ) : (
+              <div className="space-y-2">
+                {filteredBatches.map((b) => {
+                  const allObs = [
+                    ...b.deliverObligations.map((ob) => ({ ...ob, side: 'deliver' as const })),
+                    ...b.receiveObligations.map((ob) => ({ ...ob, side: 'receive' as const })),
+                  ];
+                  const totalUsd   = allObs.reduce((s, ob) => s + ob.amountUsd, 0);
+                  const clearedUsd = allObs.reduce((s, ob) => s + ob.clearedUsd, 0);
+                  const batchPct   = totalUsd > 0 ? Math.round((clearedUsd / totalUsd) * 100) : 0;
+                  const isExpanded = expandedBatches.has(b.id);
+
+                  return (
+                    <div key={b.id} className="border border-gray-200 dark:border-[var(--border)] rounded-xl overflow-hidden">
+
+                      {/* Card header */}
+                      <button
+                        className="w-full flex items-center gap-3 px-4 py-3 bg-white dark:bg-[var(--surface-1)] hover:bg-gray-50 dark:hover:bg-[var(--surface-2)] transition-colors text-left"
+                        onClick={() =>
+                          setExpandedBatches((prev) => {
+                            const next = new Set(prev);
+                            if (next.has(b.id)) next.delete(b.id); else next.add(b.id);
+                            return next;
+                          })
+                        }
+                        aria-expanded={isExpanded}
+                      >
+                        <CounterpartyAvatar name={b.counterpartyName} size={32} />
+                        <div className="flex-1 min-w-0">
+                          <p className="text-[10px] text-gray-400 dark:text-gray-500">{b.id}</p>
+                          <p className="text-sm font-semibold text-gray-800 dark:text-gray-100">{b.counterpartyName}</p>
+                          <p className="text-[10px] text-gray-400 dark:text-gray-500 mt-0.5">
+                            {allObs.length} obligation{allObs.length !== 1 ? 's' : ''}{' '}
+                            · {fmtUsdCompact(b.totalUsd)} total{' '}
+                            · <span className="text-[var(--positive)]">{batchPct}% cleared</span>
+                          </p>
+                        </div>
+                        <span className="inline-block rounded px-1.5 py-0.5 text-2xs font-medium leading-tight tabular-nums whitespace-nowrap bg-green-50 dark:bg-green-900/20 text-[var(--positive)] border border-green-200 dark:border-green-800 flex-shrink-0">
+                          {batchPct}% Cleared
+                        </span>
+                        {isExpanded
+                          ? <ChevronDown size={14} className="text-gray-400 dark:text-gray-500 flex-shrink-0" aria-hidden />
+                          : <ChevronRight size={14} className="text-gray-400 dark:text-gray-500 flex-shrink-0" aria-hidden />
+                        }
+                      </button>
+
+                      {/* Mini table */}
+                      {isExpanded && (
+                        <table className="w-full text-xs">
+                          <thead>
+                            <tr className="bg-gray-50 dark:bg-[var(--color-1)] border-b border-gray-100 dark:border-[var(--border)] text-[10px] uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                              <th className="text-left pl-4 pr-2 py-2 font-medium">Asset</th>
+                              <th className="text-left px-2 py-2 font-medium">Direction</th>
+                              <th className="text-right px-2 py-2 font-medium">Posted</th>
+                              <th className="text-right px-2 py-2 font-medium">Cleared</th>
+                              <th className="text-right px-2 py-2 font-medium">Remaining</th>
+                              <th className="pr-4 py-2" />
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {allObs.map((ob, idx) => (
+                              <tr
+                                key={idx}
+                                className={idx % 2 === 1 ? 'bg-gray-50/60 dark:bg-[var(--surface-2)]/30' : ''}
+                              >
+                                <td className="pl-4 pr-2 py-2">
+                                  <div className="flex items-center gap-1.5">
+                                    <CryptoIcon symbol={ob.asset} size={14} />
+                                    <span className="font-medium text-gray-700 dark:text-gray-200">{ob.asset}</span>
+                                  </div>
+                                </td>
+                                <td className="px-2 py-2">
+                                  {ob.side === 'deliver' ? (
+                                    <span className="inline-flex items-center gap-1 text-[10px] font-medium text-[var(--negative)]">
+                                      <ArrowUp size={10} aria-hidden />Deliver
+                                    </span>
+                                  ) : (
+                                    <span className="inline-flex items-center gap-1 text-[10px] font-medium text-[var(--positive)]">
+                                      <ArrowDown size={10} aria-hidden />Receive
+                                    </span>
+                                  )}
+                                </td>
+                                <td className="px-2 py-2 text-right tabular-nums text-gray-800 dark:text-gray-100">
+                                  {ob.amountAsset.toLocaleString(undefined, { maximumFractionDigits: 8 })}
+                                </td>
+                                <td className="px-2 py-2 text-right tabular-nums">
+                                  {ob.clearedAsset > 0 ? (
+                                    <span className={ob.side === 'deliver' ? 'text-[var(--negative)]' : 'text-[var(--positive)]'}>
+                                      {ob.clearedAsset.toLocaleString(undefined, { maximumFractionDigits: 8 })}
+                                    </span>
+                                  ) : (
+                                    <span className="text-gray-300 dark:text-gray-600">—</span>
+                                  )}
+                                </td>
+                                <td className="px-2 py-2 text-right tabular-nums">
+                                  {ob.remainingAsset > 0.001 ? (
+                                    <span className="text-gray-800 dark:text-gray-100">
+                                      {ob.remainingAsset.toLocaleString(undefined, { maximumFractionDigits: 8 })}
+                                    </span>
+                                  ) : (
+                                    <span className="text-[var(--positive)]">—</span>
+                                  )}
+                                </td>
+                                <td className="pl-2 pr-4 py-2 text-right">
+                                  {(ob.asset === 'USDC' || ob.asset === 'USDT') && ob.remainingUsd > 0 && (
+                                    <button
+                                      onClick={() =>
+                                        setSettlementTarget({
+                                          counterpartyName: b.counterpartyName,
+                                          amountUsd: ob.remainingUsd,
+                                          asset: ob.asset,
+                                        })
+                                      }
+                                      className="text-[10px] font-semibold px-2.5 py-1 rounded-full border border-[#1e8dc9]/40 bg-[#1e8dc9]/10 text-[#1e8dc9] whitespace-nowrap hover:bg-[#1e8dc9]/20 transition-colors"
+                                    >
+                                      Settle w/ Lynq
+                                    </button>
+                                  )}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      )}
+
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* Settlement modal */}
+            {settlementTarget && (
+              <LinkSettlementModal
+                target={settlementTarget}
+                onClose={() => setSettlementTarget(null)}
+                onConfirm={() => setSettlementTarget(null)}
+              />
+            )}
+          </div>
         ) : (
-        <table className="w-full text-xs">
-          <thead>
-            <tr className="bg-gray-50 dark:bg-[var(--color-1)] border-b border-gray-100 dark:border-[var(--border)] text-[10px] uppercase tracking-wide text-gray-500 dark:text-gray-400">
-              <th className="text-left pl-4 pr-2 py-2 font-medium">ID</th>
-              <th className="text-left px-2 py-2 font-medium">Counterparty</th>
-              <th className="text-right px-2 py-2 font-medium">Posted</th>
-              <th className="text-right px-2 py-2 font-medium">Delivered by Clearing</th>
-              <th className="text-right px-2 py-2 font-medium">Received by Clearing</th>
-              <th className="text-right px-2 py-2 font-medium">Remaining to Settle</th>
-              <th className="text-right px-2 py-2 font-medium">Cleared (%)</th>
-              <th className="text-right pr-4 py-2 font-medium">Cleared (USD)</th>
-            </tr>
-          </thead>
-          <tbody>
-            {groups.map((group) => (
-              <React.Fragment key={group.asset}>
-                <tr className="bg-gray-50/60 dark:bg-[var(--color-1)]/40">
-                  <td colSpan={8} className="pl-4 py-1.5">
-                    <span className="flex items-center gap-1.5 text-[10px] font-bold text-gray-700 dark:text-gray-200 uppercase tracking-wide">
-                      <CryptoIcon symbol={group.asset} size={12} />
-                      {group.asset}
-                    </span>
-                  </td>
-                </tr>
-                {group.rows.map((row) => (
-                  <tr key={row.id} className="border-b border-gray-50 dark:border-[var(--border)] hover:bg-gray-50/50 dark:hover:bg-[var(--surface-2)]">
-                    <td className="pl-4 pr-2 py-1.5 font-mono text-[10px] text-gray-400 dark:text-gray-500">{row.id}</td>
-                    <td className={`px-2 py-1.5 text-xs font-semibold ${row.side === 'deliver' ? 'text-red-500 dark:text-red-400' : 'text-[var(--positive)]'}`}>
-                      {row.counterparty}
-                    </td>
-                    <td className="px-2 py-1.5 text-right tabular-nums text-gray-600 dark:text-gray-300">{fmtAssetAmt(row.posted, group.asset)}</td>
-                    <td className="px-2 py-1.5 text-right tabular-nums">
-                      {row.deliveredByClearing > 0
-                        ? <span className="text-red-500 dark:text-red-400">{fmtAssetAmt(row.deliveredByClearing, group.asset)}</span>
-                        : <span className="text-gray-300 dark:text-gray-600">—</span>}
-                    </td>
-                    <td className="px-2 py-1.5 text-right tabular-nums">
-                      {row.receivedByClearing > 0
-                        ? <span className="text-[var(--positive)]">{fmtAssetAmt(row.receivedByClearing, group.asset)}</span>
-                        : <span className="text-gray-300 dark:text-gray-600">—</span>}
-                    </td>
-                    <td className="px-2 py-1.5 text-right tabular-nums">
-                      {row.remainingToSettle > 0.001
-                        ? <span className="text-red-500 dark:text-red-400">{fmtAssetAmt(row.remainingToSettle, group.asset)}</span>
-                        : <span className="text-[var(--positive)]">—</span>}
-                    </td>
-                    <td className="px-2 py-1.5 text-right tabular-nums text-gray-600 dark:text-gray-300">{row.clearedPct.toFixed(2)}%</td>
-                    <td className="px-2 pr-4 py-1.5 text-right tabular-nums text-gray-700 dark:text-gray-200">{fmtUsdFull(row.clearedUsd)}</td>
-                  </tr>
-                ))}
-                <tr className="bg-gray-50/80 dark:bg-[var(--color-1)]/30 border-b border-gray-100 dark:border-[var(--border)]">
-                  <td className="pl-4 pr-2 py-1"></td>
-                  <td className="px-2 py-1"></td>
-                  <td className="px-2 py-1 text-right tabular-nums text-[10px] font-medium text-gray-600 dark:text-gray-300">{fmtAssetAmt(group.subtotalPosted, group.asset)}</td>
-                  <td className="px-2 py-1 text-right tabular-nums text-[10px] font-medium text-red-400">{fmtAssetAmt(group.subtotalDelivered, group.asset)}</td>
-                  <td className="px-2 py-1 text-right tabular-nums text-[10px] font-medium text-[var(--positive)]">{fmtAssetAmt(group.subtotalReceived, group.asset)}</td>
-                  <td className="px-2 py-1"></td>
-                  <td className="px-2 py-1"></td>
-                  <td className="px-2 pr-4 py-1 text-right tabular-nums text-[10px] font-medium text-gray-600 dark:text-gray-300">{fmtUsdFull(group.subtotalClearedUsd)}</td>
-                </tr>
-              </React.Fragment>
-            ))}
-          </tbody>
-        </table>
+        <div className="p-4">
+          <div className="space-y-2">
+            {groups.map((group) => {
+              const isExpanded = expandedAssets.has(group.asset);
+              return (
+                <div key={group.asset} className="border border-gray-200 dark:border-[var(--border)] rounded-xl overflow-hidden">
+
+                  {/* Card header */}
+                  <button
+                    className="w-full flex items-center gap-3 px-4 py-3 bg-white dark:bg-[var(--surface-1)] hover:bg-gray-50 dark:hover:bg-[var(--surface-2)] transition-colors text-left"
+                    onClick={() =>
+                      setExpandedAssets((prev) => {
+                        const next = new Set(prev);
+                        if (next.has(group.asset)) next.delete(group.asset); else next.add(group.asset);
+                        return next;
+                      })
+                    }
+                    aria-expanded={isExpanded}
+                  >
+                    <CryptoIcon symbol={group.asset} size={32} />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold text-gray-800 dark:text-gray-100">{group.asset}</p>
+                      <p className="text-[10px] text-gray-400 dark:text-gray-500 mt-0.5">
+                        {group.rows.length} obligation{group.rows.length !== 1 ? 's' : ''}{' '}
+                        · {fmtAssetAmt(group.subtotalPosted, group.asset)} posted{' '}
+                        · <span className="text-[var(--positive)]">{fmtUsdFull(group.subtotalClearedUsd)} cleared</span>
+                      </p>
+                    </div>
+                    {isExpanded
+                      ? <ChevronDown size={14} className="text-gray-400 dark:text-gray-500 flex-shrink-0" aria-hidden />
+                      : <ChevronRight size={14} className="text-gray-400 dark:text-gray-500 flex-shrink-0" aria-hidden />
+                    }
+                  </button>
+
+                  {/* Detail table */}
+                  {isExpanded && (
+                    <table className="w-full text-xs">
+                      <thead>
+                        <tr className="bg-gray-50 dark:bg-[var(--color-1)] border-b border-gray-100 dark:border-[var(--border)] text-[10px] uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                          <th className="text-left pl-4 pr-2 py-2 font-medium">ID</th>
+                          <th className="text-left px-2 py-2 font-medium">Counterparty</th>
+                          <th className="text-left px-2 py-2 font-medium">Direction</th>
+                          <th className="text-right px-2 py-2 font-medium">Posted</th>
+                          <th className="text-right px-2 py-2 font-medium">Cleared</th>
+                          <th className="text-right px-2 py-2 font-medium">Remaining</th>
+                          <th className="text-right px-2 py-2 font-medium">Cleared (%)</th>
+                          <th className="text-right pr-4 py-2 font-medium">Cleared (USD)</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {group.rows.map((row) => (
+                          <tr key={row.id} className={`group hover-row border-b border-gray-50 dark:border-[var(--border)] last:border-b-0 transition-colors ${row.side === 'deliver' ? 'row-deliver' : 'row-receive'}`}>
+                            <td className="pl-4 pr-2 py-1.5 text-[10px] text-gray-400 dark:text-gray-500">{row.id}</td>
+                            <td className="px-2 py-1.5">
+                              <div className="flex items-center gap-1.5">
+                                <CounterpartyAvatar name={row.counterparty} size={18} />
+                                <span className="text-xs font-semibold text-gray-700 dark:text-gray-200">{row.counterparty}</span>
+                              </div>
+                            </td>
+                            <td className="px-2 py-1.5">
+                              {row.side === 'deliver'
+                                ? <span className="inline-flex items-center gap-1 text-[10px] font-medium text-[var(--negative)]"><ArrowUp aria-hidden="true" className="w-3 h-3 flex-shrink-0" strokeWidth={2} />Deliver</span>
+                                : <span className="inline-flex items-center gap-1 text-[10px] font-medium text-[var(--positive)]"><ArrowDown aria-hidden="true" className="w-3 h-3 flex-shrink-0" strokeWidth={2} />Receive</span>
+                              }
+                            </td>
+                            <td className="px-2 py-1.5 text-right tabular-nums text-gray-800 dark:text-gray-100">{fmtAssetAmt(row.posted, group.asset)}</td>
+                            <td className="px-2 py-1.5 text-right tabular-nums">
+                              {row.side === 'deliver'
+                                ? (row.deliveredByClearing > 0
+                                    ? <span className="text-[var(--negative)]">{fmtAssetAmt(row.deliveredByClearing, group.asset)}</span>
+                                    : <span className="text-gray-300 dark:text-gray-600">—</span>)
+                                : (row.receivedByClearing > 0
+                                    ? <span className="text-[var(--positive)]">{fmtAssetAmt(row.receivedByClearing, group.asset)}</span>
+                                    : <span className="text-gray-300 dark:text-gray-600">—</span>)
+                              }
+                            </td>
+                            <td className="px-2 py-1.5 text-right tabular-nums">
+                              {row.remainingToSettle > 0.001
+                                ? <span className="text-gray-800 dark:text-gray-100">{fmtAssetAmt(row.remainingToSettle, group.asset)}</span>
+                                : <span className="text-[var(--positive)]">—</span>}
+                            </td>
+                            <td className="px-2 py-1.5 text-right tabular-nums text-gray-600 dark:text-gray-300">{row.clearedPct.toFixed(2)}%</td>
+                            <td className={`px-2 pr-4 py-1.5 text-right tabular-nums ${row.side === 'deliver' ? 'text-[var(--negative)]' : 'text-[var(--positive)]'}`}>{fmtUsdFull(row.clearedUsd)}</td>
+                          </tr>
+                        ))}
+                        <tr className="bg-gray-50/80 dark:bg-[var(--color-1)]/30 border-t border-gray-100 dark:border-[var(--border)]">
+                          <td className="pl-4 pr-2 py-1"></td>
+                          <td className="px-2 py-1"></td>
+                          <td className="px-2 py-1"></td>
+                          <td className="px-2 py-1 text-right tabular-nums text-[10px] font-medium text-gray-800 dark:text-gray-100">{fmtAssetAmt(group.subtotalPosted, group.asset)}</td>
+                          <td className="px-2 py-1 text-right">
+                            <div className="flex flex-col items-end gap-0.5">
+                              <span className="tabular-nums text-[10px] font-medium text-[var(--negative)]">{fmtAssetAmt(group.subtotalDelivered, group.asset)}</span>
+                              <span className="tabular-nums text-[10px] font-medium text-[var(--positive)]">{fmtAssetAmt(group.subtotalReceived, group.asset)}</span>
+                            </div>
+                          </td>
+                          <td className="px-2 py-1"></td>
+                          <td className="px-2 py-1"></td>
+                          <td className="px-2 pr-4 py-1 text-right tabular-nums text-[10px] font-medium text-gray-600 dark:text-gray-300">{fmtUsdFull(group.subtotalClearedUsd)}</td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  )}
+
+                </div>
+              );
+            })}
+          </div>
+        </div>
         )}
       </div>
     </div>
@@ -923,25 +1245,55 @@ function CycleDetailPanel({ cycle, batches }: { cycle: Cycle; batches: import('.
       ) : (
         <>
           {/* KPI row */}
-          <div className="grid grid-cols-4 gap-4">
-            {[
-              { label: 'Total', value: fmtUsdCompact(cycle.totalUsd), sub: fmtUsdFull(cycle.totalUsd), accent: '' },
-              { label: 'Cleared', value: fmtUsdCompact(cycle.clearedUsd), sub: fmtUsdFull(cycle.clearedUsd), accent: 'text-[var(--positive)]' },
-              { label: 'Remaining', value: fmtUsdCompact(cycle.remainingUsd), sub: fmtUsdFull(cycle.remainingUsd), accent: 'text-gray-500 dark:text-gray-400' },
-              { label: '% Cleared', value: fmtPct(cycle.percentCleared), sub: `${cycle.obligationsByCounterparty.length} counterparties`, accent: 'text-[var(--color-700)] dark:text-[var(--color-300)]' },
-            ].map(({ label, value, sub, accent }) => (
-              <div key={label} className="bg-white dark:bg-[var(--color-2)] rounded-xl border border-gray-100 dark:border-[var(--border)] px-5 py-4">
-                <p className="text-[10px] text-gray-400 dark:text-gray-500 uppercase tracking-wide font-medium mb-1.5">{label}</p>
-                <p className={`text-xl font-bold tabular-nums ${accent || 'text-gray-900 dark:text-gray-100'}`}>{value}</p>
-                <p className="text-[10px] text-gray-400 dark:text-gray-500 tabular-nums mt-1">{sub}</p>
+          <div className="grid grid-cols-2 gap-4">
+            {/* Deliver box */}
+            <div className="bg-white dark:bg-[var(--color-2)] rounded-xl shadow-sm dark:shadow-none dark:border dark:border-[var(--border)] px-5 py-4">
+              <div className="flex items-center gap-1.5 mb-3">
+                <ArrowUp aria-hidden="true" className="w-3.5 h-3.5 text-[var(--negative)]" strokeWidth={2} />
+                <p className="text-[10px] text-[var(--negative)] uppercase tracking-wide font-semibold">To deliver</p>
               </div>
-            ))}
+              <div className="space-y-2">
+                <div className="flex items-baseline justify-between gap-2">
+                  <span className="text-[10px] text-gray-400 dark:text-gray-500 flex-shrink-0">Original</span>
+                  <span className="text-sm font-bold tabular-nums text-gray-800 dark:text-gray-100">{fmtUsdFull(cycle.deliverTotalUsd)}</span>
+                </div>
+                <div className="flex items-baseline justify-between gap-2">
+                  <span className="text-[10px] text-gray-400 dark:text-gray-500 flex-shrink-0">Cleared</span>
+                  <span className="text-sm font-bold tabular-nums text-[var(--negative)]">− {fmtUsdFull(cycle.deliverClearedUsd)}</span>
+                </div>
+                <div className="flex items-baseline justify-between gap-2">
+                  <span className="text-[10px] text-gray-400 dark:text-gray-500 flex-shrink-0">Remaining</span>
+                  <span className="text-sm font-bold tabular-nums text-gray-800 dark:text-gray-100">= {fmtUsdFull(cycle.deliverRemainingUsd)}</span>
+                </div>
+              </div>
+            </div>
+            {/* Receive box */}
+            <div className="bg-white dark:bg-[var(--color-2)] rounded-xl shadow-sm dark:shadow-none dark:border dark:border-[var(--border)] px-5 py-4">
+              <div className="flex items-center gap-1.5 mb-3">
+                <ArrowDown aria-hidden="true" className="w-3.5 h-3.5 text-[var(--positive)]" strokeWidth={2} />
+                <p className="text-[10px] text-[var(--positive)] uppercase tracking-wide font-semibold">To receive</p>
+              </div>
+              <div className="space-y-2">
+                <div className="flex items-baseline justify-between gap-2">
+                  <span className="text-[10px] text-gray-400 dark:text-gray-500 flex-shrink-0">Original</span>
+                  <span className="text-sm font-bold tabular-nums text-gray-800 dark:text-gray-100">{fmtUsdFull(cycle.receiveTotalUsd)}</span>
+                </div>
+                <div className="flex items-baseline justify-between gap-2">
+                  <span className="text-[10px] text-gray-400 dark:text-gray-500 flex-shrink-0">Cleared</span>
+                  <span className="text-sm font-bold tabular-nums text-[var(--positive)]">− {fmtUsdFull(cycle.receiveClearedUsd)}</span>
+                </div>
+                <div className="flex items-baseline justify-between gap-2">
+                  <span className="text-[10px] text-gray-400 dark:text-gray-500 flex-shrink-0">Remaining</span>
+                  <span className="text-sm font-bold tabular-nums text-gray-800 dark:text-gray-100">= {fmtUsdFull(cycle.receiveRemainingUsd)}</span>
+                </div>
+              </div>
+            </div>
           </div>
 
           {/* Charts side by side */}
           <div className="grid grid-cols-2 gap-4">
             {/* Bar chart — switches with breakdown */}
-            <div className="bg-white dark:bg-[var(--color-2)] rounded-xl border border-gray-100 dark:border-[var(--border)] overflow-hidden flex flex-col h-[280px]">
+            <div className="bg-white dark:bg-[var(--color-2)] rounded-xl shadow-sm dark:shadow-none dark:border dark:border-[var(--border)] overflow-hidden flex flex-col h-[280px]">
               <div className="px-5 py-3 border-b border-gray-100 dark:border-[var(--border)] flex items-center justify-between gap-2 flex-shrink-0">
                 <p className="text-xs font-semibold text-gray-700 dark:text-gray-200">
                   {chartBreakdown === 'counterparty' ? 'By counterparty' : 'By asset'}
@@ -971,7 +1323,7 @@ function CycleDetailPanel({ cycle, batches }: { cycle: Cycle; batches: import('.
             </div>
 
             {/* Pie chart — always shows overall clearing split */}
-            <div className="bg-white dark:bg-[var(--color-2)] rounded-xl border border-gray-100 dark:border-[var(--border)] overflow-hidden flex flex-col h-[280px]">
+            <div className="bg-white dark:bg-[var(--color-2)] rounded-xl shadow-sm dark:shadow-none dark:border dark:border-[var(--border)] overflow-hidden flex flex-col h-[280px]">
               <div className="px-4 py-2.5 border-b border-gray-100 dark:border-[var(--border)] flex-shrink-0">
                 <p className="text-xs font-semibold text-gray-700 dark:text-gray-200">Clearing split</p>
               </div>
@@ -1052,14 +1404,9 @@ export default function CyclesView({ batches }: CyclesViewProps) {
 
       {/* ── LEFT PANEL: cycle selector ─────────────────────────────────────── */}
       <div
-        className="w-[28%] min-w-[260px] max-w-[320px] flex flex-col border-r border-gray-200 dark:border-[var(--border)] bg-white dark:bg-[var(--color-2)]"
+        className="w-[28%] min-w-[260px] max-w-[320px] flex flex-col border-r border-gray-200 dark:border-[var(--border)] bg-white dark:bg-black"
         style={{ flexShrink: 0 }}
       >
-        {/* Panel header */}
-        <div className="px-4 py-3 border-b border-gray-200 dark:border-[var(--border)] flex-shrink-0">
-          <span className="text-xs font-semibold text-gray-700 dark:text-gray-200 uppercase tracking-wide">Cycles</span>
-        </div>
-
         {/* Scrollable list */}
         <div
           role="listbox"
@@ -1086,7 +1433,7 @@ export default function CyclesView({ batches }: CyclesViewProps) {
           {/* ── History section ── */}
           <div className="px-2 pt-3 pb-1 flex items-center justify-between">
             <span className="text-[10px] text-gray-400 dark:text-gray-600 uppercase tracking-wide font-medium">History</span>
-            <span className="text-[10px] text-gray-400 dark:text-gray-600">{pastCycles.length} completed</span>
+            <span className="text-[10px] text-gray-400 dark:text-gray-600 uppercase tracking-wide font-medium">Cleared %</span>
           </div>
 
           <div className="space-y-0.5">
@@ -1105,31 +1452,7 @@ export default function CyclesView({ batches }: CyclesViewProps) {
 
       {/* ── RIGHT PANEL: analytics ──────────────────────────────────────────── */}
       <div className="flex-1 overflow-hidden bg-gray-50 dark:bg-[var(--color-1)]">
-        {/* Right panel header */}
-        <div className="px-5 py-3 border-b border-gray-200 dark:border-[var(--border)] bg-white dark:bg-[var(--color-2)] flex items-center gap-2 flex-shrink-0">
-          {selectedCycle?.isScheduled ? (
-            <>
-              <Timer className="w-3.5 h-3.5 text-amber-500 dark:text-amber-400" strokeWidth={2} />
-              <span className="text-xs font-semibold text-gray-700 dark:text-gray-200">Next Cycle</span>
-              <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-400 border border-amber-200 dark:border-amber-800 font-medium ml-1">Scheduled</span>
-            </>
-          ) : selectedCycle ? (
-            <>
-              <RefreshCw className="w-3.5 h-3.5 text-[var(--color-300)]" strokeWidth={2} />
-              <span className="text-xs font-semibold text-gray-700 dark:text-gray-200">{selectedCycle.id}</span>
-              <span className="text-gray-300 dark:text-gray-600 text-xs">·</span>
-              <span className="text-xs text-gray-500 dark:text-gray-400">{fmtDate(selectedCycle.date)}</span>
-            </>
-          ) : (
-            <>
-              <TrendingUp className="w-3.5 h-3.5 text-[var(--color-300)]" strokeWidth={2} />
-              <span className="text-xs font-semibold text-gray-700 dark:text-gray-200">Account Overview</span>
-              <span className="text-[10px] text-gray-400 dark:text-gray-500 ml-1">All cycles</span>
-            </>
-          )}
-        </div>
-
-        <div className="h-[calc(100%-41px)] overflow-hidden">
+        <div className="h-full overflow-hidden">
           {selectedCycle?.isScheduled ? (
             <TricklingPanel cycle={selectedCycle} batches={batches} />
           ) : selectedCycle ? (

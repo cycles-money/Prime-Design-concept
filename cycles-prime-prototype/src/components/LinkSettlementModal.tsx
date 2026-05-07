@@ -41,7 +41,7 @@ function DetailRow({ label, value, mono = false }: { label: string; value: strin
         {label}
       </td>
       <td
-        className={`px-4 py-2.5 text-xs text-gray-800 bg-white border-b border-gray-200 ${mono ? 'font-mono' : ''}`}
+        className="px-4 py-2.5 text-xs text-gray-800 bg-white border-b border-gray-200"
       >
         {value || <span className="text-gray-300">—</span>}
       </td>
@@ -112,7 +112,7 @@ export default function LinkSettlementModal({ target, onClose, onConfirm }: Prop
           {/* Center: account name + masked number */}
           <div className="flex flex-col items-center flex-1 min-w-0" id="lynq-modal-title">
             <span className="text-sm font-semibold text-white">{LYNQ_SENDER}</span>
-            <span className="text-xs text-white/70 font-mono tracking-wider">••••••6098</span>
+            <span className="text-xs text-white/70 tracking-wider">••••••6098</span>
           </div>
 
           {/* Right: log out */}
@@ -121,7 +121,7 @@ export default function LinkSettlementModal({ target, onClose, onConfirm }: Prop
               onClick={onClose}
               className="text-xs font-semibold text-white border border-white/60 hover:border-white hover:bg-white/10 px-3 py-1 rounded-full transition-colors"
             >
-              LOG OUT
+              Log out
             </button>
           </div>
         </div>
@@ -140,7 +140,7 @@ export default function LinkSettlementModal({ target, onClose, onConfirm }: Prop
             </p>
 
             <p className="text-xs text-gray-500 mb-1">to</p>
-            <p className="text-xs font-mono text-gray-700 bg-white border border-gray-200 rounded px-3 py-1.5 mb-4 break-all">
+            <p className="text-xs text-gray-700 bg-white border border-gray-200 rounded px-3 py-1.5 mb-4 break-all">
               {contact.accountId}
             </p>
 
@@ -148,14 +148,14 @@ export default function LinkSettlementModal({ target, onClose, onConfirm }: Prop
               Transfers are processed in real-time. View complete details in your Transaction History.
             </p>
             <p className="text-xs text-gray-500 mb-6">
-              Request ID: <span className="font-mono text-gray-600">{requestId}</span>
+              Request ID: <span className="text-gray-600">{requestId}</span>
             </p>
 
             <button
               onClick={onConfirm}
               className="w-full max-w-xs bg-[#CDF698] hover:bg-[var(--color-200)] text-gray-900 text-sm font-semibold py-3 rounded-full transition-colors"
             >
-              DONE
+              Done
             </button>
           </div>
         ) : (
@@ -181,7 +181,7 @@ export default function LinkSettlementModal({ target, onClose, onConfirm }: Prop
                     </td>
                     <td className="px-4 py-2.5 text-xs bg-white border-b border-gray-200">
                       <span className="flex items-center gap-2 justify-between">
-                        <span className="font-mono text-gray-800 text-[11px] truncate">
+                        <span className="text-gray-800 text-[11px] truncate">
                           {truncateId(contact.accountId, 24)}
                         </span>
                         <button
@@ -214,13 +214,13 @@ export default function LinkSettlementModal({ target, onClose, onConfirm }: Prop
                 className="w-full bg-[#1a2b4a] hover:bg-[#162340] text-white text-sm font-semibold py-3 rounded-full transition-colors flex items-center justify-center gap-2 focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--color-700)] focus-visible:outline-offset-2"
               >
                 <Send className="w-4 h-4" strokeWidth={2} />
-                CONFIRM SEND
+                Confirm send
               </button>
               <button
                 onClick={onClose}
                 className="text-xs text-gray-500 hover:text-gray-700 transition-colors underline underline-offset-1"
               >
-                CANCEL
+                Cancel
               </button>
             </div>
           </div>
