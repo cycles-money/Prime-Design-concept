@@ -28,7 +28,6 @@ export default function App() {
   const [batches, setBatches] = useState<Batch[]>(mockBatches);
   const [initialBatchId, setInitialBatchId] = useState<string | undefined>(undefined);
   const [initialCpFilter, setInitialCpFilter] = useState<string | undefined>(undefined);
-  const [targetCpName, setTargetCpName] = useState<string | undefined>(undefined);
   const [batchesKey, setBatchesKey] = useState(0);
   const [cpKey, setCpKey] = useState(0);
 
@@ -39,7 +38,6 @@ export default function App() {
       setInitialCpFilter(undefined);
       setBatchesKey((k) => k + 1);
     } else if (tab === 'counterparties') {
-      setTargetCpName(undefined);
       setCpKey((k) => k + 1);
     }
     setActiveTab(tab);
@@ -65,31 +63,21 @@ export default function App() {
     return () => window.removeEventListener('navigate-tab', handler);
   }, []);
 
+  // Navigate to the batches page, optionally drilling into a specific batch
+  // and/or pre-applying a counterparty filter. Either field may be omitted —
+  // e.g. the Counterparties list dispatches { cpName } only.
   useEffect(() => {
     const handler = (e: Event) => {
-      const detail = (e as CustomEvent<string | { batchId: string; cpName?: string }>).detail;
+      const detail = (e as CustomEvent<string | { batchId?: string; cpName?: string }>).detail;
       const batchId = typeof detail === 'string' ? detail : detail?.batchId;
       const cpName = typeof detail === 'string' ? undefined : detail?.cpName;
-      if (batchId) {
-        setInitialBatchId(batchId);
-        setInitialCpFilter(cpName);
-        setActiveTab('batches');
-      }
+      if (!batchId && !cpName) return;
+      setInitialBatchId(batchId);
+      setInitialCpFilter(cpName);
+      setActiveTab('batches');
     };
     window.addEventListener('navigate-to-batch', handler);
     return () => window.removeEventListener('navigate-to-batch', handler);
-  }, []);
-
-  useEffect(() => {
-    const handler = (e: Event) => {
-      const cpName = (e as CustomEvent<string>).detail;
-      if (cpName) {
-        setTargetCpName(cpName);
-        setActiveTab('counterparties');
-      }
-    };
-    window.addEventListener('navigate-to-counterparty', handler);
-    return () => window.removeEventListener('navigate-to-counterparty', handler);
   }, []);
 
   return (
@@ -214,7 +202,7 @@ export default function App() {
         <main id="main-content" className="flex-1 overflow-hidden">
           {activeTab === 'batches'        ? <BatchesView key={batchesKey} batches={batches} onBatchesChange={setBatches} initialBatchId={initialBatchId} initialCpFilter={initialCpFilter} />
           : activeTab === 'cycles'         ? <CyclesView batches={batches} />
-          : activeTab === 'counterparties' ? <CounterpartiesView key={cpKey} batches={batches} targetCpName={targetCpName} />
+          : activeTab === 'counterparties' ? <CounterpartiesView key={cpKey} batches={batches} />
           : activeTab === 'settings'       ? <SettingsView />
           : activeTab === 'overview'       ? (
               <div className="flex flex-col h-full overflow-hidden bg-gray-50 dark:bg-[var(--color-1)]">
