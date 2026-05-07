@@ -244,12 +244,16 @@ function DeleteConfirmModal({
 // batches page filtered by the chosen counterparty. No KPIs, no per-CP stats,
 // no aggregated metrics, no detail page.
 
+const ROW_PAGE = 25;
+
 export default function CounterpartiesView({ batches }: { batches: Batch[] }) {
   const [counterparties, setCounterparties] = useState<Counterparty[]>(SEED);
   const [showAdd, setShowAdd] = useState(false);
   const [editTarget, setEditTarget] = useState<Counterparty | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Counterparty | null>(null);
   const [search, setSearch] = useState('');
+  const [visibleRows, setVisibleRows] = useState<number>(ROW_PAGE);
+  const sentinelRef = useRef<HTMLTableRowElement>(null);
 
   // Merge SEED with any counterparty names that exist on batches but not in
   // the local CRUD list (so users see everyone they're transacting with).
@@ -264,6 +268,26 @@ export default function CounterpartiesView({ batches }: { batches: Batch[] }) {
     const q = search.toLowerCase();
     return cp.name.toLowerCase().includes(q) || cp.lynqName.toLowerCase().includes(q);
   });
+
+  useEffect(() => {
+    setVisibleRows(ROW_PAGE);
+  }, [filtered.length]);
+
+  useEffect(() => {
+    const node = sentinelRef.current;
+    if (!node) return;
+    if (visibleRows >= filtered.length) return;
+    const obs = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((e) => e.isIntersecting)) {
+          setVisibleRows((v) => Math.min(v + ROW_PAGE, filtered.length));
+        }
+      },
+      { rootMargin: '200px 0px' },
+    );
+    obs.observe(node);
+    return () => obs.disconnect();
+  }, [visibleRows, filtered.length]);
 
   const goToBatches = (cpName: string) => {
     window.dispatchEvent(new CustomEvent('navigate-to-batch', { detail: { cpName } }));
@@ -315,7 +339,7 @@ export default function CounterpartiesView({ batches }: { batches: Batch[] }) {
 
       {/* Body */}
       <div className="flex-1 overflow-y-auto p-5">
-        <div className="rounded-2xl overflow-hidden bg-white dark:bg-[var(--color-2)] shadow-md">
+        <div className="rounded-2xl overflow-hidden bg-white dark:bg-[var(--color-2)]">
           <div className="flex items-center justify-between px-4 py-2.5 border-b border-gray-100 dark:border-[var(--border)]">
             <span className="text-2xs font-medium text-gray-700 dark:text-gray-200">All counterparties</span>
             <span className="text-2xs text-gray-400 dark:text-gray-500 tabular-nums">
@@ -337,7 +361,7 @@ export default function CounterpartiesView({ batches }: { batches: Batch[] }) {
                 </tr>
               </thead>
               <tbody>
-                {filtered.map((cp) => (
+                {filtered.slice(0, visibleRows).map((cp) => (
                   <tr
                     key={cp.id}
                     onClick={() => goToBatches(cp.name)}
@@ -377,6 +401,19 @@ export default function CounterpartiesView({ batches }: { batches: Batch[] }) {
                     </td>
                   </tr>
                 ))}
+                {visibleRows < filtered.length ? (
+                  <tr ref={sentinelRef}>
+                    <td colSpan={3} className="text-center py-4 text-2xs text-gray-400 dark:text-gray-500">
+                      Loading more… ({visibleRows} of {filtered.length})
+                    </td>
+                  </tr>
+                ) : filtered.length > ROW_PAGE ? (
+                  <tr>
+                    <td colSpan={3} className="text-center py-3 text-2xs text-gray-400 dark:text-gray-500">
+                      End of list — {filtered.length} counterparties
+                    </td>
+                  </tr>
+                ) : null}
               </tbody>
             </table>
           )}

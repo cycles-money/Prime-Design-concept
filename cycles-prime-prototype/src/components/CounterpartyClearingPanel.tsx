@@ -579,7 +579,7 @@ export default function CounterpartyClearingPanel({ cycles }: CounterpartyCleari
   };
 
   return (
-    <div className="bg-white dark:bg-[var(--color-1)] rounded-2xl shadow-md overflow-hidden">
+    <div className="bg-white dark:bg-[var(--color-1)] rounded-2xl overflow-hidden">
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200 dark:border-[var(--border)] flex-wrap gap-2">
         <div className="flex items-center gap-2">

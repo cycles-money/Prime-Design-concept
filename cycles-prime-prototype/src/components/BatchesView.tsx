@@ -456,7 +456,7 @@ function CombinedObligationTable({
   const totalCols = 3 + (anyRefNumber ? 1 : 0) + (showClearing ? 2 : 0) + (anyLynqEligible ? 1 : 0) + 1;
 
   return (
-    <div className="rounded-2xl overflow-hidden bg-gray-300 dark:bg-[#131417] shadow-md">
+    <div className="rounded-2xl overflow-hidden bg-gray-300 dark:bg-[#131417]">
       {/* Search + filter toolbar */}
       <div className="flex items-center gap-2 px-4 pt-4">
         <div className="relative flex-1">
@@ -974,7 +974,7 @@ const EVENT_STYLES: Record<ActivityEventType, { icon: React.ReactNode; dot: stri
 function ActivityCard({ entries }: { entries: ActivityEntry[] }) {
   const [open, setOpen] = useState(false);
   return (
-    <div className="rounded-xl shadow-md dark:shadow-[0_8px_24px_rgba(0,0,0,0.5)] overflow-hidden bg-white dark:bg-[var(--color-2)]">
+    <div className="rounded-xl overflow-hidden bg-white dark:bg-[var(--color-2)]">
       <button
         onClick={() => setOpen(v => !v)}
         className="hover-item w-full flex items-center justify-between px-4 py-2.5 text-left transition-colors"
@@ -1286,7 +1286,7 @@ function BatchDetail({ batch, onUpdate, onDelete }: BatchDetailProps) {
             { label: 'To deliver', icon: ArrowUp,   color: 'text-[var(--negative)]', total: deliverTotalUsd, cleared: deliverClearedUsd, remaining: deliverRemainingUsd, count: batch.deliverObligations.length },
             { label: 'To receive', icon: ArrowDown, color: 'text-[var(--positive)]', total: receiveTotalUsd, cleared: receiveClearedUsd, remaining: receiveRemainingUsd, count: batch.receiveObligations.length },
           ] as const).map(({ label, icon: Icon, color, total, cleared, remaining, count }) => (
-            <div key={label} className="bg-white dark:bg-[var(--color-2)] rounded-xl shadow-md dark:shadow-[0_8px_24px_rgba(0,0,0,0.5)] px-5 py-4">
+            <div key={label} className="bg-white dark:bg-[var(--color-2)] rounded-xl px-5 py-4">
               <div className="flex items-center justify-between mb-3">
                 <div className="flex items-center gap-1.5">
                   <Icon aria-hidden="true" className={`w-3.5 h-3.5 ${color}`} strokeWidth={2} />
@@ -1395,7 +1395,7 @@ function BatchDetail({ batch, onUpdate, onDelete }: BatchDetailProps) {
         )}
 
         {/* Reference card — collapsible */}
-        <div className="rounded-xl shadow-md dark:shadow-[0_8px_24px_rgba(0,0,0,0.5)] overflow-hidden bg-white dark:bg-[var(--color-2)]">
+        <div className="rounded-xl overflow-hidden bg-white dark:bg-[var(--color-2)]">
           <button
             onClick={() => setShowGuide((v) => !v)}
             className="hover-item w-full flex items-center justify-between px-5 py-3 text-left transition-colors"
@@ -1712,7 +1712,7 @@ function ImportModal({ onConfirm, onClose, existingCounterparties }: ImportModal
   const [parseError, setParseError] = useState('');
   const [submitMode, setSubmitMode] = useState<SubmitMode>('draft');
   const [importedBatches, setImportedBatches] = useState<Batch[]>([]);
-  const [expandedBatches, setExpandedBatches] = useState<Set<number>>(new Set());
+  const [selectedBatchIdx, setSelectedBatchIdx] = useState<number>(0);
   const fileRef = useRef<HTMLInputElement>(null);
   const [isDragging, setIsDragging] = useState(false);
 
@@ -1767,7 +1767,10 @@ function ImportModal({ onConfirm, onClose, existingCounterparties }: ImportModal
 
   const goNext = () => {
     if (step === 'upload') {
-      if (runValidation()) setStep('review');
+      if (runValidation()) {
+        setStep('review');
+        setSelectedBatchIdx(0);
+      }
     } else if (step === 'review') {
       finalize();
     }
@@ -1787,15 +1790,6 @@ function ImportModal({ onConfirm, onClose, existingCounterparties }: ImportModal
 
   const handleDone = () => {
     onConfirm(importedBatches);
-  };
-
-  const toggleBatchExpand = (idx: number) => {
-    setExpandedBatches(prev => {
-      const next = new Set(prev);
-      if (next.has(idx)) next.delete(idx);
-      else next.add(idx);
-      return next;
-    });
   };
 
   const totalObl = parseResult?.batches.reduce((s, b) => s + b.obligations.length, 0) ?? 0;
@@ -1845,85 +1839,98 @@ function ImportModal({ onConfirm, onClose, existingCounterparties }: ImportModal
     return false;
   })();
 
+  const selectedBatch = parseResult?.batches[selectedBatchIdx] ?? null;
+
   return (
-    <div className="modal-overlay" onClick={(e) => e.target === e.currentTarget && step !== 'complete' && onClose()}>
-      <div
-        className="bg-white dark:bg-[var(--color-1)] rounded-lg shadow-xl w-[85vw] max-w-[1400px] mx-4 overflow-hidden border border-gray-200 dark:border-[var(--border)]"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="import-modal-title"
-        onKeyDown={handleKey}
-      >
-        {/* Header */}
-        <div className="flex items-center justify-between px-5 py-3 border-b border-gray-200 dark:border-[var(--border)]">
-          <div className="flex items-center gap-2">
-            <div className="w-6 h-6 rounded bg-[var(--color-50)] dark:bg-[var(--color-950)]/20 flex items-center justify-center">
-              <Upload aria-hidden="true" className="w-3.5 h-3.5 text-[var(--color-700)] dark:text-[var(--color-300)]" strokeWidth={2} />
-            </div>
-            <span id="import-modal-title" className="text-sm font-semibold text-gray-900 dark:text-gray-100">
-              Import obligations
-            </span>
+    <div
+      className="fixed inset-0 z-50 bg-gray-50 dark:bg-[var(--color-1)] flex flex-col"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="import-modal-title"
+      onKeyDown={handleKey}
+    >
+      {/* Header */}
+      <div className="flex-shrink-0 flex items-center justify-between px-6 py-3 bg-white dark:bg-black border-b border-gray-200 dark:border-[var(--border)] h-12">
+        <div className="flex items-center gap-2.5">
+          <div className="w-6 h-6 rounded bg-[var(--color-50)] dark:bg-[var(--color-950)]/20 flex items-center justify-center">
+            <Upload aria-hidden="true" className="w-3.5 h-3.5 text-[var(--color-700)] dark:text-[var(--color-300)]" strokeWidth={2} />
           </div>
-          <button onClick={onClose} className="text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 transition-colors rounded-full p-0.5" aria-label="Close">
-            <X aria-hidden="true" className="w-4 h-4" strokeWidth={2} />
-          </button>
+          <span id="import-modal-title" className="text-sm font-semibold text-gray-900 dark:text-gray-100">
+            Import obligations
+          </span>
+          {fileName && step !== 'upload' && (
+            <span className="text-2xs text-gray-400 dark:text-gray-500 ml-2 truncate max-w-[280px]">{fileName}</span>
+          )}
         </div>
+        <button
+          onClick={onClose}
+          className="text-gray-500 hover:text-gray-700 dark:hover:text-gray-200 transition-colors rounded p-1"
+          aria-label="Close"
+        >
+          <X aria-hidden="true" className="w-4 h-4" strokeWidth={2} />
+        </button>
+      </div>
 
-        {/* Stepper */}
-        <div className="px-5 py-3 bg-gray-50 dark:bg-[var(--surface-3)] border-b border-gray-200 dark:border-[var(--border)]">
-          <ol className="flex items-center gap-1">
-            {STEP_ORDER.map((s, i) => {
-              const isDone = i < currentStepIdx;
-              const isCurrent = i === currentStepIdx;
-              return (
-                <React.Fragment key={s}>
-                  {i > 0 && (
-                    <span className={`flex-1 h-px ${isDone ? 'bg-[var(--positive)]' : 'bg-gray-200 dark:bg-gray-600'}`} />
-                  )}
-                  <li className="flex items-center gap-1.5">
-                    <span
-                      className={`w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0 text-[10px] font-semibold tabular-nums ${
-                        isDone ? 'bg-[var(--positive)] text-white' :
-                        isCurrent ? 'bg-[var(--color-700)] text-white dark:bg-[var(--color-300)] dark:text-gray-900' :
-                        'bg-gray-200 dark:bg-gray-600 text-gray-400 dark:text-gray-500'
-                      }`}
-                    >
-                      {isDone ? <Check aria-hidden="true" className="w-3 h-3" strokeWidth={3} /> : i + 1}
-                    </span>
-                    <span className={`text-[11px] font-medium whitespace-nowrap ${
-                      isCurrent ? 'text-gray-900 dark:text-gray-100' :
-                      isDone ? 'text-[var(--positive)]' :
-                      'text-gray-400 dark:text-gray-500'
-                    }`}>
-                      {STEP_LABELS[s]}
-                    </span>
-                  </li>
-                </React.Fragment>
-              );
-            })}
-          </ol>
-        </div>
+      {/* Stepper */}
+      <div className="flex-shrink-0 px-6 py-2.5 bg-white dark:bg-[var(--color-2)] border-b border-gray-200 dark:border-[var(--border)]">
+        <ol className="flex items-center gap-1 max-w-[520px] mx-auto">
+          {STEP_ORDER.map((s, i) => {
+            const isDone = i < currentStepIdx;
+            const isCurrent = i === currentStepIdx;
+            return (
+              <React.Fragment key={s}>
+                {i > 0 && (
+                  <span className={`flex-1 h-px ${isDone ? 'bg-[var(--positive)]' : 'bg-gray-200 dark:bg-gray-600'}`} />
+                )}
+                <li className="flex items-center gap-1.5">
+                  <span
+                    className={`w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0 text-[10px] font-semibold tabular-nums ${
+                      isDone ? 'bg-[var(--positive)] text-white' :
+                      isCurrent ? 'bg-[var(--color-700)] text-white dark:bg-[var(--color-300)] dark:text-gray-900' :
+                      'bg-gray-200 dark:bg-gray-600 text-gray-400 dark:text-gray-500'
+                    }`}
+                  >
+                    {isDone ? <Check aria-hidden="true" className="w-3 h-3" strokeWidth={3} /> : i + 1}
+                  </span>
+                  <span className={`text-[11px] font-medium whitespace-nowrap ${
+                    isCurrent ? 'text-gray-900 dark:text-gray-100' :
+                    isDone ? 'text-[var(--positive)]' :
+                    'text-gray-400 dark:text-gray-500'
+                  }`}>
+                    {STEP_LABELS[s]}
+                  </span>
+                </li>
+              </React.Fragment>
+            );
+          })}
+        </ol>
+      </div>
 
-        {/* Body */}
-        <div className="px-5 py-4 min-h-[420px] max-h-[75vh] overflow-y-auto">
-          {step === 'upload' && (
-            <div className="space-y-3">
-              {/* File upload area — drag & drop + click to browse */}
+      {/* Body — fills remaining viewport */}
+      <div className="flex-1 overflow-hidden flex flex-col">
+        {step === 'upload' && (
+          <div className="flex-1 overflow-y-auto flex items-center justify-center px-6 py-8">
+            <div className="w-full max-w-2xl space-y-4">
+              <div className="text-center mb-6">
+                <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Upload your obligations file</h2>
+                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                  We'll parse it, group by counterparty, and let you fix any issues before importing.
+                </p>
+              </div>
+
               <input ref={fileRef} type="file" accept=".csv,.txt" className="sr-only" aria-label="Upload CSV or text file" onChange={handleFileChange} />
               {fileName ? (
-                <div className="flex items-center justify-between gap-3 px-4 py-3 bg-[var(--positive)]/10 border border-[var(--positive)]/30 rounded-lg">
-                  <div className="flex items-center gap-2.5">
-                    <CheckCircle aria-hidden="true" className="w-4 h-4 text-[var(--positive)] flex-shrink-0" strokeWidth={2} />
+                <div className="flex items-center justify-between gap-3 px-5 py-4 bg-[var(--positive)]/10 border border-[var(--positive)]/30 rounded-xl">
+                  <div className="flex items-center gap-3">
+                    <CheckCircle aria-hidden="true" className="w-5 h-5 text-[var(--positive)] flex-shrink-0" strokeWidth={2} />
                     <div>
-                      <p className="text-xs font-semibold text-gray-800 dark:text-gray-200">{fileName}</p>
-                      <p className="text-2xs text-gray-500 dark:text-gray-400 mt-0.5">
-                        {fileSizeKb} KB · file accepted
-                      </p>
+                      <p className="text-sm font-semibold text-gray-800 dark:text-gray-200">{fileName}</p>
+                      <p className="text-2xs text-gray-500 dark:text-gray-400 mt-0.5">{fileSizeKb} KB · file accepted</p>
                     </div>
                   </div>
                   <button
                     onClick={clearFile}
-                    className="text-2xs text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 transition-colors"
+                    className="text-xs text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 transition-colors px-3 py-1.5 rounded-full border border-gray-300 dark:border-[var(--border)]"
                   >
                     Replace
                   </button>
@@ -1942,26 +1949,29 @@ function ImportModal({ onConfirm, onClose, existingCounterparties }: ImportModal
                   role="button"
                   tabIndex={0}
                   aria-label="Upload a .csv or .txt file by drag and drop or click to browse"
-                  className={`w-full rounded-xl border-2 border-dashed transition-colors cursor-pointer px-6 py-10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[oklch(0.683_0.106_127.892_/_0.45)] ${
+                  className={`w-full rounded-2xl border-2 border-dashed transition-colors cursor-pointer px-8 py-16 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[oklch(0.683_0.106_127.892_/_0.45)] ${
                     isDragging
                       ? 'border-[var(--color-700)] bg-[var(--color-50)] dark:bg-[var(--color-950)]/30'
-                      : 'border-gray-300 dark:border-[var(--border)] bg-gray-50/40 dark:bg-[var(--surface-3)]/30 hover:border-[var(--color-700)] hover:bg-[var(--color-50)] dark:hover:bg-[var(--color-950)]/20'
+                      : 'border-gray-300 dark:border-[var(--border)] bg-white dark:bg-[var(--color-2)] hover:border-[var(--color-700)] hover:bg-[var(--color-50)] dark:hover:bg-[var(--color-950)]/20'
                   }`}
                 >
-                  <div className="flex flex-col items-center gap-3 pointer-events-none">
-                    <div className={`w-12 h-12 rounded-full flex items-center justify-center transition-colors ${
+                  <div className="flex flex-col items-center gap-4 pointer-events-none">
+                    <div className={`w-16 h-16 rounded-full flex items-center justify-center transition-colors ${
                       isDragging
                         ? 'bg-[var(--color-700)] text-white dark:bg-[var(--color-300)] dark:text-gray-900'
                         : 'bg-gray-100 dark:bg-[var(--surface-2)] text-gray-500 dark:text-gray-400'
                     }`}>
-                      <Upload aria-hidden="true" className="w-5 h-5" strokeWidth={2} />
+                      <Upload aria-hidden="true" className="w-7 h-7" strokeWidth={1.75} />
                     </div>
                     <div className="text-center">
-                      <p className="text-sm font-semibold text-gray-700 dark:text-gray-200">
+                      <p className="text-base font-semibold text-gray-700 dark:text-gray-200">
                         {isDragging ? 'Drop file to upload' : 'Drag and drop, or click to browse'}
                       </p>
-                      <p className="text-2xs text-gray-400 dark:text-gray-500 mt-1.5">
-                        Supports .csv or .txt · Position CSV, Batch Export CSV, or natural-language statements
+                      <p className="text-xs text-gray-400 dark:text-gray-500 mt-2">
+                        Supports .csv or .txt
+                      </p>
+                      <p className="text-2xs text-gray-400 dark:text-gray-500 mt-0.5">
+                        Position CSV · Batch Export CSV · Natural-language statements
                       </p>
                     </div>
                   </div>
@@ -1969,375 +1979,373 @@ function ImportModal({ onConfirm, onClose, existingCounterparties }: ImportModal
               )}
 
               {parseError && (
-                <div className="flex items-start gap-2 px-3 py-2 bg-[var(--negative)]/10 border border-[var(--negative)]/30 rounded-lg">
-                  <AlertCircle aria-hidden="true" className="w-3.5 h-3.5 text-[var(--negative)] flex-shrink-0 mt-0.5" strokeWidth={2} />
-                  <p className="text-2xs text-[var(--negative)]">{parseError}</p>
+                <div className="flex items-start gap-2 px-3 py-2.5 bg-[var(--negative)]/10 border border-[var(--negative)]/30 rounded-lg">
+                  <AlertCircle aria-hidden="true" className="w-4 h-4 text-[var(--negative)] flex-shrink-0 mt-0.5" strokeWidth={2} />
+                  <p className="text-xs text-[var(--negative)]">{parseError}</p>
                 </div>
               )}
             </div>
-          )}
+          </div>
+        )}
 
-          {step === 'review' && parseResult && (
-            <div className="space-y-3">
-              {/* Inline summary (formerly the Validate step) */}
-              <div className="grid grid-cols-3 gap-3">
-                <div className="px-3 py-2.5 bg-gray-50 dark:bg-[var(--surface-3)] rounded-lg">
-                  <p className="text-2xs text-gray-500 dark:text-gray-400 uppercase tracking-wide font-medium">Batches</p>
-                  <p className="text-lg font-bold tabular-nums text-gray-900 dark:text-gray-100 mt-0.5">{n}</p>
-                </div>
-                <div className="px-3 py-2.5 bg-gray-50 dark:bg-[var(--surface-3)] rounded-lg">
-                  <p className="text-2xs text-gray-500 dark:text-gray-400 uppercase tracking-wide font-medium">Obligations</p>
-                  <p className="text-lg font-bold tabular-nums text-gray-900 dark:text-gray-100 mt-0.5">{totalObl}</p>
-                </div>
-                <div className="px-3 py-2.5 bg-gray-50 dark:bg-[var(--surface-3)] rounded-lg">
-                  <p className="text-2xs text-gray-500 dark:text-gray-400 uppercase tracking-wide font-medium">Needs attention</p>
-                  <p className={`text-lg font-bold tabular-nums mt-0.5 ${issueCounts.total > 0 ? 'text-amber-600 dark:text-amber-400' : 'text-[var(--positive)]'}`}>
-                    {issueCounts.total}
-                  </p>
-                </div>
+        {step === 'review' && parseResult && selectedBatch && (
+          <div className="flex-1 overflow-hidden flex flex-col">
+            {/* Summary strip */}
+            <div className="flex-shrink-0 flex items-center gap-6 px-6 py-3 bg-white dark:bg-[var(--color-2)] border-b border-gray-200 dark:border-[var(--border)]">
+              <div className="flex items-baseline gap-1.5">
+                <span className="text-lg font-bold tabular-nums text-gray-900 dark:text-gray-100">{n}</span>
+                <span className="text-2xs text-gray-500 dark:text-gray-400 uppercase tracking-wide">batch{n !== 1 ? 'es' : ''}</span>
               </div>
-
+              <span className="w-px h-6 bg-gray-200 dark:bg-[var(--border)]" />
+              <div className="flex items-baseline gap-1.5">
+                <span className="text-lg font-bold tabular-nums text-gray-900 dark:text-gray-100">{totalObl}</span>
+                <span className="text-2xs text-gray-500 dark:text-gray-400 uppercase tracking-wide">obligations</span>
+              </div>
+              <span className="w-px h-6 bg-gray-200 dark:bg-[var(--border)]" />
+              <div className="flex items-baseline gap-1.5">
+                <span className={`text-lg font-bold tabular-nums ${issueCounts.total > 0 ? 'text-amber-600 dark:text-amber-400' : 'text-[var(--positive)]'}`}>
+                  {issueCounts.total}
+                </span>
+                <span className="text-2xs text-gray-500 dark:text-gray-400 uppercase tracking-wide">need attention</span>
+              </div>
+              {issueCounts.total === 0 && (
+                <div className="ml-auto flex items-center gap-1.5 text-xs text-[var(--positive)] font-medium">
+                  <CheckCircle aria-hidden="true" className="w-3.5 h-3.5" strokeWidth={2} />
+                  All rows parsed cleanly
+                </div>
+              )}
               {issueCounts.total > 0 && (
-                <div className="px-3 py-2.5 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg">
-                  <div className="flex items-start gap-2">
-                    <AlertCircle aria-hidden="true" className="w-4 h-4 text-amber-600 dark:text-amber-400 flex-shrink-0 mt-0.5" strokeWidth={2} />
-                    <div className="flex-1">
-                      <p className="text-xs font-semibold text-amber-700 dark:text-amber-400 mb-1.5">
-                        Some rows need your input before they can be imported
-                      </p>
-                      <ul className="space-y-1 text-2xs text-amber-700 dark:text-amber-400">
-                        {issueCounts.unknownCp > 0 && (
-                          <li><span className="font-semibold">{issueCounts.unknownCp}</span> batch{issueCounts.unknownCp !== 1 ? 'es' : ''} with no counterparty — pick one below.</li>
-                        )}
-                        {issueCounts.ambiguousDir > 0 && (
-                          <li><span className="font-semibold">{issueCounts.ambiguousDir}</span> obligation{issueCounts.ambiguousDir !== 1 ? 's' : ''} where direction couldn't be inferred — confirm Deliver/Receive.</li>
-                        )}
-                        {issueCounts.missingAmount > 0 && (
-                          <li><span className="font-semibold">{issueCounts.missingAmount}</span> obligation{issueCounts.missingAmount !== 1 ? 's' : ''} with missing or zero amount — enter a value.</li>
-                        )}
-                      </ul>
-                    </div>
-                  </div>
+                <div className="ml-auto flex items-center gap-3 text-2xs text-amber-700 dark:text-amber-400">
+                  {issueCounts.unknownCp > 0 && <span><span className="font-semibold">{issueCounts.unknownCp}</span> unknown CP</span>}
+                  {issueCounts.ambiguousDir > 0 && <span><span className="font-semibold">{issueCounts.ambiguousDir}</span> direction</span>}
+                  {issueCounts.missingAmount > 0 && <span><span className="font-semibold">{issueCounts.missingAmount}</span> missing amount</span>}
                 </div>
               )}
+            </div>
 
-              {parseResult.warnings.length > 0 && (
-                <div className="px-3 py-2.5 bg-gray-50 dark:bg-[var(--surface-3)] border border-gray-200 dark:border-[var(--border)] rounded-lg">
-                  <div className="flex items-start gap-2 mb-1.5">
-                    <Info aria-hidden="true" className="w-4 h-4 text-gray-500 dark:text-gray-400 flex-shrink-0 mt-0.5" strokeWidth={2} />
-                    <p className="text-xs font-semibold text-gray-700 dark:text-gray-200">
-                      {parseResult.warnings.length} {parseResult.warnings.length === 1 ? 'line was' : 'lines were'} skipped (unparseable)
-                    </p>
-                  </div>
-                  <ul className="space-y-0.5 ml-6">
-                    {parseResult.warnings.map((w, i) => (
-                      <li key={i} className="text-2xs text-gray-500 dark:text-gray-400">{w}</li>
-                    ))}
-                  </ul>
+            {/* Two-pane: batch list + detail */}
+            <div className="flex-1 overflow-hidden flex">
+              {/* Left rail — batch list */}
+              <div className="w-[340px] flex-shrink-0 border-r border-gray-200 dark:border-[var(--border)] bg-white dark:bg-[var(--color-2)] flex flex-col">
+                <div className="flex-shrink-0 flex items-center justify-between px-4 py-2.5 border-b border-gray-100 dark:border-[var(--border)]">
+                  <p className="text-2xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">Batches</p>
+                  <p className="text-2xs text-gray-400 dark:text-gray-500 tabular-nums">{n}</p>
                 </div>
-              )}
-
-              {issueCounts.total === 0 && parseResult.warnings.length === 0 && (
-                <div className="flex items-center gap-2 px-3 py-2.5 bg-[var(--positive)]/10 border border-[var(--positive)]/30 rounded-lg">
-                  <CheckCircle aria-hidden="true" className="w-4 h-4 text-[var(--positive)] flex-shrink-0" strokeWidth={2} />
-                  <p className="text-xs text-gray-700 dark:text-gray-200 font-medium">All rows parsed cleanly. Pick a submission path below to import.</p>
-                </div>
-              )}
-
-              <div className="flex items-center justify-between pt-1">
-                <p className="text-2xs text-gray-500 dark:text-gray-400">
-                  {n} batch{n !== 1 ? 'es' : ''} · {totalObl} obligation{totalObl !== 1 ? 's' : ''} · click a batch to expand and edit
-                </p>
-              </div>
-
-              {parseResult.batches.map((b, i) => {
-                const isExpanded = expandedBatches.has(i);
-                const dc = b.obligations.filter(o => o.direction === 'deliver').length;
-                const rc = b.obligations.filter(o => o.direction === 'receive').length;
-                const uc = b.obligations.filter(o => o.direction === 'unknown').length;
-                const usd = b.obligations.reduce((s, o) => s + o.amountUsd, 0);
-                const batchIssueCount = (b.counterpartyResolved ? 0 : 1)
-                  + b.obligations.filter(o => o.issues && o.issues.length > 0).length;
-                return (
-                  <div
-                    key={i}
-                    className={`rounded-lg border overflow-hidden ${
-                      batchIssueCount > 0
-                        ? 'border-amber-300 dark:border-amber-700 bg-amber-50/30 dark:bg-amber-900/10'
-                        : 'border-gray-200 dark:border-[var(--border)]'
-                    }`}
-                  >
-                    <button
-                      onClick={() => toggleBatchExpand(i)}
-                      className="hover-item w-full flex items-center justify-between px-3 py-2.5 text-left transition-colors"
-                      aria-expanded={isExpanded}
-                    >
-                      <div className="flex items-center gap-2 min-w-0">
-                        <ChevronRight
-                          aria-hidden="true"
-                          className={`w-3 h-3 text-gray-400 dark:text-gray-500 transition-transform duration-150 flex-shrink-0 ${isExpanded ? 'rotate-90' : ''}`}
-                          strokeWidth={2}
-                        />
-                        <span className={`text-xs font-semibold truncate ${b.counterpartyResolved ? 'text-gray-800 dark:text-gray-200' : 'text-amber-700 dark:text-amber-400'}`}>
-                          {b.counterpartyName}
-                        </span>
-                        <span className="text-2xs text-gray-400 dark:text-gray-500 whitespace-nowrap">
-                          {dc} deliver · {rc} receive{uc > 0 ? ` · ${uc} unknown` : ''}
-                        </span>
-                      </div>
-                      <div className="flex items-center gap-2 flex-shrink-0">
-                        {batchIssueCount > 0 && (
-                          <span className="inline-flex items-center gap-1 text-2xs font-medium text-amber-700 dark:text-amber-400 bg-amber-100 dark:bg-amber-900/30 rounded-full px-1.5 py-0.5">
-                            <AlertCircle aria-hidden="true" className="w-2.5 h-2.5" strokeWidth={2.5} />
-                            {batchIssueCount}
+                <div className="flex-1 overflow-y-auto">
+                  {parseResult.batches.map((b, i) => {
+                    const dc = b.obligations.filter((o) => o.direction === 'deliver').length;
+                    const rc = b.obligations.filter((o) => o.direction === 'receive').length;
+                    const usd = b.obligations.reduce((s, o) => s + o.amountUsd, 0);
+                    const batchIssueCount = (b.counterpartyResolved ? 0 : 1)
+                      + b.obligations.filter((o) => o.issues && o.issues.length > 0).length;
+                    const isSelected = i === selectedBatchIdx;
+                    return (
+                      <button
+                        key={i}
+                        onClick={() => setSelectedBatchIdx(i)}
+                        className={`w-full text-left px-4 py-2.5 border-b border-gray-100 dark:border-[var(--border)] transition-colors group ${
+                          isSelected
+                            ? 'bg-[var(--color-50)] dark:bg-[var(--color-950)]/30 border-l-2 border-l-[var(--color-700)] dark:border-l-[var(--color-300)]'
+                            : 'hover:bg-gray-50 dark:hover:bg-[var(--surface-3)] border-l-2 border-l-transparent'
+                        }`}
+                        aria-current={isSelected ? 'true' : undefined}
+                      >
+                        <div className="flex items-center justify-between gap-2 mb-1">
+                          <span className={`text-xs font-semibold truncate ${
+                            !b.counterpartyResolved
+                              ? 'text-amber-700 dark:text-amber-400'
+                              : 'text-gray-800 dark:text-gray-200'
+                          }`}>
+                            {b.counterpartyName}
                           </span>
-                        )}
-                        {usd > 0 && (
-                          <span className="text-2xs tabular-nums text-gray-600 dark:text-gray-300">{fmtUsdCompact(usd)}</span>
-                        )}
-                      </div>
-                    </button>
-                    {isExpanded && (
-                      <div className="border-t border-gray-100 dark:border-[var(--border)] bg-white dark:bg-[var(--color-2)]">
-                        {/* Counterparty resolver */}
-                        <div className={`flex items-center gap-3 px-3 py-2.5 border-b border-gray-100 dark:border-[var(--border)] ${
-                          !b.counterpartyResolved ? 'bg-amber-50 dark:bg-amber-900/10' : ''
-                        }`}>
-                          <span className="text-2xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide w-24 flex-shrink-0">
-                            Counterparty
-                          </span>
-                          <select
-                            value={existingCounterparties.includes(b.counterpartyName) ? b.counterpartyName : '__custom__'}
-                            onChange={(e) => {
-                              const v = e.target.value;
-                              if (v === '__custom__') return;
-                              updateBatch(i, { counterpartyName: v, counterpartyResolved: true, issues: (b.issues ?? []).filter(x => x !== 'unknown_counterparty') });
-                            }}
-                            className="flex-1 text-xs px-2 py-1 border border-gray-200 dark:border-[var(--border)] rounded bg-white dark:bg-[var(--surface-3)] text-gray-800 dark:text-gray-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--color-700)]"
-                          >
-                            {!b.counterpartyResolved && <option value="__custom__">— Pick a counterparty —</option>}
-                            {existingCounterparties.map((cp) => (
-                              <option key={cp} value={cp}>{cp}</option>
-                            ))}
-                            {b.counterpartyResolved && !existingCounterparties.includes(b.counterpartyName) && (
-                              <option value={b.counterpartyName}>{b.counterpartyName} (new)</option>
-                            )}
-                          </select>
-                          {!b.counterpartyResolved && (
-                            <span className="inline-flex items-center gap-1 text-2xs text-amber-700 dark:text-amber-400 flex-shrink-0">
-                              <AlertCircle aria-hidden="true" className="w-3 h-3" strokeWidth={2} />
-                              not in file
+                          {batchIssueCount > 0 && (
+                            <span className="inline-flex items-center gap-0.5 text-2xs font-medium text-amber-700 dark:text-amber-400 bg-amber-100 dark:bg-amber-900/30 rounded-full px-1.5 py-0.5 flex-shrink-0">
+                              <AlertCircle aria-hidden="true" className="w-2.5 h-2.5" strokeWidth={2.5} />
+                              {batchIssueCount}
                             </span>
                           )}
                         </div>
-                        {/* Obligation rows */}
-                        <table className="w-full text-2xs">
-                          <thead>
-                            <tr className="text-gray-500 dark:text-gray-400 uppercase tracking-wide text-[9px] bg-gray-50 dark:bg-[var(--color-1)]">
-                              <th className="text-left pl-3 pr-2 py-1.5 font-medium">Direction</th>
-                              <th className="text-left px-2 py-1.5 font-medium">Asset</th>
-                              <th className="text-right px-2 py-1.5 font-medium">Amount</th>
-                              <th className="text-right pr-3 py-1.5 font-medium">USD</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {b.obligations.map((ob, j) => {
-                              const hasIssue = (ob.issues?.length ?? 0) > 0;
-                              const ambiguousDir = ob.issues?.includes('ambiguous_direction');
-                              const missingAmt = ob.issues?.includes('missing_amount');
-                              return (
-                                <React.Fragment key={j}>
-                                  <tr className={`border-t border-gray-100 dark:border-[var(--border)] ${hasIssue ? 'bg-amber-50/40 dark:bg-amber-900/5' : ''}`}>
-                                    {/* Direction toggle */}
-                                    <td className="pl-3 pr-2 py-1.5">
-                                      <div className="flex items-center gap-0.5 rounded-full border border-gray-200 dark:border-[var(--border)] bg-white dark:bg-[var(--surface-3)] p-0.5 w-fit">
-                                        {(['deliver', 'receive'] as const).map((d) => (
-                                          <button
-                                            key={d}
-                                            type="button"
-                                            onClick={() => {
-                                              const newIssues = (ob.issues ?? []).filter(x => x !== 'ambiguous_direction');
-                                              updateObligation(i, j, { direction: d, issues: newIssues.length ? newIssues : undefined });
-                                            }}
-                                            className={`px-2 py-0.5 rounded-full text-[9px] font-semibold transition-colors ${
-                                              ob.direction === d
-                                                ? d === 'deliver'
-                                                  ? 'bg-red-50 dark:bg-red-900/20 text-red-500 dark:text-red-400'
-                                                  : 'bg-[var(--positive)]/10 text-[var(--positive)]'
-                                                : 'text-gray-400 dark:text-gray-500 hover:text-gray-600'
-                                            }`}
-                                          >
-                                            {d === 'deliver' ? 'Deliver' : 'Receive'}
-                                          </button>
-                                        ))}
-                                      </div>
-                                    </td>
-                                    {/* Asset */}
-                                    <td className="px-2 py-1.5">
-                                      <AssetSelect
-                                        value={ob.asset}
-                                        onChange={(newAsset) => {
-                                          const price = ASSET_USD[newAsset] ?? 1;
-                                          updateObligation(i, j, { asset: newAsset, amountUsd: ob.amountAsset > 0 ? ob.amountAsset * price : ob.amountUsd });
-                                        }}
-                                      />
-                                    </td>
-                                    {/* Amount */}
-                                    <td className="px-2 py-1.5 text-right">
-                                      <input
-                                        type="text"
-                                        inputMode="decimal"
-                                        placeholder="0"
-                                        value={ob.amountAsset > 0 ? ob.amountAsset.toLocaleString(undefined, { maximumFractionDigits: 8 }) : ''}
-                                        onChange={(e) => {
-                                          const cleaned = stripCommas(formatNumInput(e.target.value, 8));
-                                          const v = parseFloat(cleaned) || 0;
-                                          const price = ASSET_USD[ob.asset] ?? 1;
-                                          const newIssues = (ob.issues ?? []).filter(x => x !== 'missing_amount');
-                                          updateObligation(i, j, {
-                                            amountAsset: v,
-                                            amountUsd: v > 0 ? v * price : 0,
-                                            issues: (v > 0 && newIssues.length === 0) ? undefined : (v > 0 ? newIssues : ob.issues),
-                                          });
-                                        }}
-                                        className={`w-24 text-right text-[10px] font-medium bg-transparent border rounded px-1.5 py-0.5 text-gray-800 dark:text-gray-100 tabular-nums focus:outline-none ${
-                                          missingAmt
-                                            ? 'border-amber-400 dark:border-amber-700 focus:border-amber-500'
-                                            : 'border-transparent hover:border-gray-200 dark:hover:border-[var(--border)] focus:border-[var(--color-700)]'
-                                        }`}
-                                        aria-label="Amount"
-                                      />
-                                    </td>
-                                    {/* USD */}
-                                    <td className="pr-3 py-1.5 text-right tabular-nums text-gray-500 dark:text-gray-400 text-[10px]">
-                                      {ob.amountUsd > 0 ? fmtUsdCompact(ob.amountUsd) : '—'}
-                                    </td>
-                                  </tr>
-                                  {(hasIssue || ob.hint) && (
-                                    <tr className={`border-t border-gray-50 dark:border-[var(--border)] ${hasIssue ? 'bg-amber-50/40 dark:bg-amber-900/5' : ''}`}>
-                                      <td colSpan={4} className="pl-7 pr-3 pb-1.5 text-[10px]">
-                                        {ambiguousDir && (
-                                          <span className="inline-flex items-center gap-1 text-amber-700 dark:text-amber-400 mr-3">
-                                            <AlertCircle aria-hidden="true" className="w-2.5 h-2.5" strokeWidth={2.5} />
-                                            Direction unclear — pick Deliver or Receive
-                                          </span>
-                                        )}
-                                        {missingAmt && (
-                                          <span className="inline-flex items-center gap-1 text-amber-700 dark:text-amber-400 mr-3">
-                                            <AlertCircle aria-hidden="true" className="w-2.5 h-2.5" strokeWidth={2.5} />
-                                            Amount missing — enter a value
-                                          </span>
-                                        )}
-                                        {!hasIssue && ob.hint && (
-                                          <span className="text-gray-400 dark:text-gray-500 italic">{ob.hint}</span>
-                                        )}
-                                      </td>
-                                    </tr>
-                                  )}
-                                </React.Fragment>
-                              );
-                            })}
-                          </tbody>
-                        </table>
-                      </div>
-                    )}
+                        <div className="flex items-center justify-between gap-2 text-2xs text-gray-500 dark:text-gray-400">
+                          <span>{dc} deliver · {rc} receive</span>
+                          {usd > 0 && <span className="tabular-nums">{fmtUsdCompact(usd)}</span>}
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+                {parseResult.warnings.length > 0 && (
+                  <div className="flex-shrink-0 border-t border-gray-100 dark:border-[var(--border)] px-4 py-2.5 bg-gray-50 dark:bg-[var(--surface-3)]">
+                    <div className="flex items-start gap-1.5">
+                      <Info aria-hidden="true" className="w-3 h-3 text-gray-500 dark:text-gray-400 flex-shrink-0 mt-0.5" strokeWidth={2} />
+                      <p className="text-2xs text-gray-500 dark:text-gray-400">
+                        {parseResult.warnings.length} {parseResult.warnings.length === 1 ? 'line' : 'lines'} skipped
+                      </p>
+                    </div>
                   </div>
-                );
-              })}
+                )}
+              </div>
 
-              {hasUnresolvedIssues && (
-                <p className="text-2xs text-amber-700 dark:text-amber-400 italic">
-                  Resolve the {issueCounts.total} flagged item{issueCounts.total !== 1 ? 's' : ''} above to continue.
-                </p>
-              )}
+              {/* Main panel — selected batch */}
+              <div className="flex-1 overflow-hidden flex flex-col bg-gray-50 dark:bg-[var(--color-1)]">
+                {/* Selected batch header — counterparty resolver */}
+                <div className={`flex-shrink-0 px-6 py-4 border-b border-gray-200 dark:border-[var(--border)] ${
+                  !selectedBatch.counterpartyResolved
+                    ? 'bg-amber-50 dark:bg-amber-900/10'
+                    : 'bg-white dark:bg-[var(--color-2)]'
+                }`}>
+                  <div className="flex items-end justify-between gap-4">
+                    <div className="flex-1 min-w-0">
+                      <p className="text-2xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-1.5">Counterparty</p>
+                      <div className="flex items-center gap-3">
+                        <select
+                          value={existingCounterparties.includes(selectedBatch.counterpartyName) ? selectedBatch.counterpartyName : '__custom__'}
+                          onChange={(e) => {
+                            const v = e.target.value;
+                            if (v === '__custom__') return;
+                            updateBatch(selectedBatchIdx, {
+                              counterpartyName: v,
+                              counterpartyResolved: true,
+                              issues: (selectedBatch.issues ?? []).filter((x) => x !== 'unknown_counterparty'),
+                            });
+                          }}
+                          className="flex-1 max-w-md text-sm font-semibold px-3 py-2 border border-gray-300 dark:border-[var(--border)] rounded-lg bg-white dark:bg-[var(--surface-3)] text-gray-900 dark:text-gray-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-700)]"
+                        >
+                          {!selectedBatch.counterpartyResolved && <option value="__custom__">— Pick a counterparty —</option>}
+                          {existingCounterparties.map((cp) => (
+                            <option key={cp} value={cp}>{cp}</option>
+                          ))}
+                          {selectedBatch.counterpartyResolved && !existingCounterparties.includes(selectedBatch.counterpartyName) && (
+                            <option value={selectedBatch.counterpartyName}>{selectedBatch.counterpartyName} (new)</option>
+                          )}
+                        </select>
+                        {!selectedBatch.counterpartyResolved && (
+                          <span className="inline-flex items-center gap-1 text-xs text-amber-700 dark:text-amber-400 flex-shrink-0">
+                            <AlertCircle aria-hidden="true" className="w-3.5 h-3.5" strokeWidth={2} />
+                            not in file — pick one
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    <div className="flex items-baseline gap-4 text-xs flex-shrink-0">
+                      <div className="text-right">
+                        <p className="text-2xs text-gray-500 dark:text-gray-400 uppercase tracking-wide">Obligations</p>
+                        <p className="text-base font-bold tabular-nums text-gray-900 dark:text-gray-100">{selectedBatch.obligations.length}</p>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-2xs text-gray-500 dark:text-gray-400 uppercase tracking-wide">Total</p>
+                        <p className="text-base font-bold tabular-nums text-gray-900 dark:text-gray-100">
+                          {fmtUsdCompact(selectedBatch.obligations.reduce((s, o) => s + o.amountUsd, 0))}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Obligations table */}
+                <div className="flex-1 overflow-y-auto">
+                  <table className="w-full text-xs">
+                    <thead className="sticky top-0 z-10">
+                      <tr className="text-gray-500 dark:text-gray-400 uppercase tracking-wide text-[10px] bg-gray-50 dark:bg-[var(--color-1)] border-b border-gray-200 dark:border-[var(--border)]">
+                        <th className="text-left pl-6 pr-2 py-2 font-medium w-10">#</th>
+                        <th className="text-left px-2 py-2 font-medium w-44">Direction</th>
+                        <th className="text-left px-2 py-2 font-medium w-28">Asset</th>
+                        <th className="text-right px-2 py-2 font-medium">Amount</th>
+                        <th className="text-right px-2 py-2 font-medium w-32">USD value</th>
+                        <th className="text-left pr-6 pl-3 py-2 font-medium">Notes</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {selectedBatch.obligations.map((ob, j) => {
+                        const hasIssue = (ob.issues?.length ?? 0) > 0;
+                        const ambiguousDir = ob.issues?.includes('ambiguous_direction');
+                        const missingAmt = ob.issues?.includes('missing_amount');
+                        return (
+                          <tr
+                            key={j}
+                            className={`border-b border-gray-100 dark:border-[var(--border)] ${
+                              hasIssue
+                                ? 'bg-amber-50/40 dark:bg-amber-900/10'
+                                : 'bg-white dark:bg-[var(--color-2)] hover:bg-gray-50 dark:hover:bg-[var(--surface-3)]'
+                            } transition-colors`}
+                          >
+                            <td className="pl-6 pr-2 py-2 text-gray-400 dark:text-gray-500 tabular-nums text-[10px]">{j + 1}</td>
+                            <td className="px-2 py-2">
+                              <div className="flex items-center gap-0.5 rounded-full border border-gray-200 dark:border-[var(--border)] bg-white dark:bg-[var(--surface-3)] p-0.5 w-fit">
+                                {(['deliver', 'receive'] as const).map((d) => (
+                                  <button
+                                    key={d}
+                                    type="button"
+                                    onClick={() => {
+                                      const newIssues = (ob.issues ?? []).filter((x) => x !== 'ambiguous_direction');
+                                      updateObligation(selectedBatchIdx, j, { direction: d, issues: newIssues.length ? newIssues : undefined });
+                                    }}
+                                    className={`px-2.5 py-1 rounded-full text-[10px] font-semibold transition-colors ${
+                                      ob.direction === d
+                                        ? d === 'deliver'
+                                          ? 'bg-red-50 dark:bg-red-900/20 text-red-500 dark:text-red-400'
+                                          : 'bg-[var(--positive)]/10 text-[var(--positive)]'
+                                        : 'text-gray-400 dark:text-gray-500 hover:text-gray-600'
+                                    }`}
+                                  >
+                                    {d === 'deliver' ? 'Deliver' : 'Receive'}
+                                  </button>
+                                ))}
+                              </div>
+                            </td>
+                            <td className="px-2 py-2">
+                              <AssetSelect
+                                value={ob.asset}
+                                onChange={(newAsset) => {
+                                  const price = ASSET_USD[newAsset] ?? 1;
+                                  updateObligation(selectedBatchIdx, j, {
+                                    asset: newAsset,
+                                    amountUsd: ob.amountAsset > 0 ? ob.amountAsset * price : ob.amountUsd,
+                                  });
+                                }}
+                              />
+                            </td>
+                            <td className="px-2 py-2 text-right">
+                              <input
+                                type="text"
+                                inputMode="decimal"
+                                placeholder="0"
+                                value={ob.amountAsset > 0 ? ob.amountAsset.toLocaleString(undefined, { maximumFractionDigits: 8 }) : ''}
+                                onChange={(e) => {
+                                  const cleaned = stripCommas(formatNumInput(e.target.value, 8));
+                                  const v = parseFloat(cleaned) || 0;
+                                  const price = ASSET_USD[ob.asset] ?? 1;
+                                  const newIssues = (ob.issues ?? []).filter((x) => x !== 'missing_amount');
+                                  updateObligation(selectedBatchIdx, j, {
+                                    amountAsset: v,
+                                    amountUsd: v > 0 ? v * price : 0,
+                                    issues: (v > 0 && newIssues.length === 0) ? undefined : (v > 0 ? newIssues : ob.issues),
+                                  });
+                                }}
+                                className={`w-32 text-right text-xs font-medium bg-transparent border rounded px-2 py-1 text-gray-800 dark:text-gray-100 tabular-nums focus:outline-none ${
+                                  missingAmt
+                                    ? 'border-amber-400 dark:border-amber-700 focus:border-amber-500'
+                                    : 'border-transparent hover:border-gray-200 dark:hover:border-[var(--border)] focus:border-[var(--color-700)]'
+                                }`}
+                                aria-label="Amount"
+                              />
+                            </td>
+                            <td className="px-2 py-2 text-right tabular-nums text-gray-500 dark:text-gray-400">
+                              {ob.amountUsd > 0 ? fmtUsdCompact(ob.amountUsd) : <span className="text-gray-300 dark:text-gray-600">—</span>}
+                            </td>
+                            <td className="pr-6 pl-3 py-2 text-2xs">
+                              {ambiguousDir && (
+                                <span className="inline-flex items-center gap-1 text-amber-700 dark:text-amber-400">
+                                  <AlertCircle aria-hidden="true" className="w-2.5 h-2.5" strokeWidth={2.5} />
+                                  Pick direction
+                                </span>
+                              )}
+                              {missingAmt && (
+                                <span className="inline-flex items-center gap-1 text-amber-700 dark:text-amber-400">
+                                  <AlertCircle aria-hidden="true" className="w-2.5 h-2.5" strokeWidth={2.5} />
+                                  Enter amount
+                                </span>
+                              )}
+                              {!hasIssue && ob.hint && (
+                                <span className="text-gray-400 dark:text-gray-500 italic">{ob.hint}</span>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
             </div>
-          )}
+          </div>
+        )}
 
-          {step === 'complete' && (
-            <div className="flex flex-col items-center text-center py-6 space-y-3">
-              <div className="w-12 h-12 rounded-full bg-[var(--positive)]/15 flex items-center justify-center">
-                <CheckCircle aria-hidden="true" className="w-7 h-7 text-[var(--positive)]" strokeWidth={2} />
+        {step === 'complete' && (
+          <div className="flex-1 overflow-y-auto flex items-center justify-center px-6 py-8">
+            <div className="w-full max-w-xl text-center space-y-5">
+              <div className="w-16 h-16 mx-auto rounded-full bg-[var(--positive)]/15 flex items-center justify-center">
+                <CheckCircle aria-hidden="true" className="w-9 h-9 text-[var(--positive)]" strokeWidth={2} />
               </div>
               <div>
-                <p className="text-base font-bold text-gray-900 dark:text-gray-100">
+                <p className="text-xl font-bold text-gray-900 dark:text-gray-100">
                   {importedBatches.length} batch{importedBatches.length !== 1 ? 'es' : ''} imported
                 </p>
-                <p className="text-2xs text-gray-500 dark:text-gray-400 mt-1">
+                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1.5">
                   {totalObl} obligation{totalObl !== 1 ? 's' : ''} created as <span className="font-semibold">{submitMode === 'direct' ? 'Pending' : 'Draft'}</span>
                 </p>
               </div>
-              <div className="w-full max-h-32 overflow-y-auto rounded-lg border border-gray-200 dark:border-[var(--border)] divide-y divide-gray-100 dark:divide-gray-700">
+              <div className="text-left rounded-xl border border-gray-200 dark:border-[var(--border)] bg-white dark:bg-[var(--color-2)] divide-y divide-gray-100 dark:divide-[var(--border)] max-h-64 overflow-y-auto">
                 {importedBatches.map((b, i) => (
-                  <div key={i} className="flex items-center justify-between px-3 py-1.5 text-left">
-                    <span className="text-2xs font-semibold text-gray-700 dark:text-gray-200">{b.counterpartyName}</span>
+                  <div key={i} className="flex items-center justify-between px-4 py-2">
+                    <span className="text-xs font-semibold text-gray-700 dark:text-gray-200">{b.counterpartyName}</span>
                     <span className="text-2xs tabular-nums text-gray-500 dark:text-gray-400">{b.id}</span>
                   </div>
                 ))}
               </div>
             </div>
-          )}
-        </div>
+          </div>
+        )}
+      </div>
 
-        {/* Footer */}
-        <div className="px-5 py-3 bg-gray-50 dark:bg-[var(--surface-3)] border-t border-gray-200 dark:border-[var(--border)] flex items-center justify-end gap-2.5">
-          {step !== 'upload' && step !== 'complete' && (
+      {/* Footer */}
+      <div className="flex-shrink-0 px-6 py-3 bg-white dark:bg-black border-t border-gray-200 dark:border-[var(--border)] flex items-center justify-end gap-2.5">
+        {step !== 'upload' && step !== 'complete' && (
+          <button
+            onClick={goBack}
+            className="hover-item px-4 py-1.5 text-xs font-medium text-gray-700 dark:text-gray-300 bg-white dark:bg-[var(--surface-3)] border border-gray-300 dark:border-[var(--border)] rounded-full transition-colors mr-auto"
+          >
+            ← Back
+          </button>
+        )}
+        {step !== 'complete' && (
+          <button
+            onClick={onClose}
+            className="hover-item px-4 py-1.5 text-xs font-medium text-gray-700 dark:text-gray-300 bg-white dark:bg-[var(--surface-3)] border border-gray-300 dark:border-[var(--border)] rounded-full transition-colors"
+          >
+            Cancel
+          </button>
+        )}
+        {step === 'review' ? (
+          <>
             <button
-              onClick={goBack}
-              className="hover-item px-4 py-1.5 text-xs font-medium text-gray-700 dark:text-gray-300 bg-white dark:bg-[var(--surface-3)] border border-gray-300 dark:border-[var(--border)] rounded-full transition-colors mr-auto"
+              onClick={() => { if (canGoNext) { setSubmitMode('draft'); finalize(); } }}
+              disabled={!canGoNext}
+              className={`flex items-center gap-1.5 px-4 py-1.5 text-xs font-medium rounded-full transition-colors border ${
+                canGoNext
+                  ? 'text-gray-700 dark:text-gray-200 bg-white dark:bg-[var(--surface-3)] border-gray-300 dark:border-[var(--border)] hover:bg-gray-100 dark:hover:bg-[var(--surface-2)]'
+                  : 'text-gray-400 dark:text-gray-600 bg-white dark:bg-[var(--surface-3)] border-gray-200 dark:border-[var(--border)] opacity-50 cursor-not-allowed'
+              }`}
             >
-              ← Back
+              Import as draft{n !== 1 ? 's' : ''}
             </button>
-          )}
-          {step !== 'complete' && (
             <button
-              onClick={onClose}
-              className="hover-item px-4 py-1.5 text-xs font-medium text-gray-700 dark:text-gray-300 bg-white dark:bg-[var(--surface-3)] border border-gray-300 dark:border-[var(--border)] rounded-full transition-colors"
-            >
-              Cancel
-            </button>
-          )}
-          {step === 'review' ? (
-            <>
-              <button
-                onClick={() => { if (canGoNext) { setSubmitMode('draft'); finalize(); } }}
-                disabled={!canGoNext}
-                className={`flex items-center gap-1.5 px-4 py-1.5 text-xs font-medium rounded-full transition-colors border ${
-                  canGoNext
-                    ? 'text-gray-700 dark:text-gray-200 bg-white dark:bg-[var(--surface-3)] border-gray-300 dark:border-[var(--border)] hover:bg-gray-100 dark:hover:bg-[var(--surface-2)]'
-                    : 'text-gray-400 dark:text-gray-600 bg-white dark:bg-[var(--surface-3)] border-gray-200 dark:border-[var(--border)] opacity-50 cursor-not-allowed'
-                }`}
-              >
-                Import as draft{n !== 1 ? 's' : ''}
-              </button>
-              <button
-                onClick={() => { if (canGoNext) { setSubmitMode('direct'); finalize(); } }}
-                disabled={!canGoNext}
-                className={`flex items-center gap-1.5 px-4 py-1.5 text-xs font-medium rounded-full transition-colors text-gray-900 bg-[#CDF698] ${canGoNext ? 'hover:bg-[var(--color-200)]' : 'opacity-30 cursor-not-allowed'}`}
-              >
-                <CheckCircle aria-hidden="true" className="w-3 h-3" strokeWidth={2.5} />
-                Send to counterparties
-              </button>
-            </>
-          ) : step === 'complete' ? (
-            <button
-              onClick={handleDone}
-              autoFocus
-              className="flex items-center gap-1.5 px-4 py-1.5 text-xs font-medium rounded-full transition-colors text-gray-900 bg-[#CDF698] hover:bg-[var(--color-200)]"
-            >
-              View imported batches
-              <ChevronRight aria-hidden="true" className="w-3 h-3" strokeWidth={2.5} />
-            </button>
-          ) : (
-            <button
-              onClick={goNext}
+              onClick={() => { if (canGoNext) { setSubmitMode('direct'); finalize(); } }}
               disabled={!canGoNext}
               className={`flex items-center gap-1.5 px-4 py-1.5 text-xs font-medium rounded-full transition-colors text-gray-900 bg-[#CDF698] ${canGoNext ? 'hover:bg-[var(--color-200)]' : 'opacity-30 cursor-not-allowed'}`}
             >
-              Continue
-              <ChevronRight aria-hidden="true" className="w-3 h-3" strokeWidth={2.5} />
+              <CheckCircle aria-hidden="true" className="w-3 h-3" strokeWidth={2.5} />
+              Send to counterparties
             </button>
-          )}
-        </div>
+          </>
+        ) : step === 'complete' ? (
+          <button
+            onClick={handleDone}
+            autoFocus
+            className="flex items-center gap-1.5 px-4 py-1.5 text-xs font-medium rounded-full transition-colors text-gray-900 bg-[#CDF698] hover:bg-[var(--color-200)]"
+          >
+            View imported batches
+            <ChevronRight aria-hidden="true" className="w-3 h-3" strokeWidth={2.5} />
+          </button>
+        ) : (
+          <button
+            onClick={goNext}
+            disabled={!canGoNext}
+            className={`flex items-center gap-1.5 px-4 py-1.5 text-xs font-medium rounded-full transition-colors text-gray-900 bg-[#CDF698] ${canGoNext ? 'hover:bg-[var(--color-200)]' : 'opacity-30 cursor-not-allowed'}`}
+          >
+            Continue
+            <ChevronRight aria-hidden="true" className="w-3 h-3" strokeWidth={2.5} />
+          </button>
+        )}
       </div>
     </div>
   );
@@ -2423,7 +2431,7 @@ function PostedTotalOverview({ batches }: { batches: Batch[] }) {
       ) : (
         <div className="flex-1 overflow-y-auto p-4 space-y-4">
           {/* By asset */}
-          <div className="rounded-xl overflow-hidden bg-white dark:bg-[var(--color-2)] shadow-sm dark:shadow-none dark:border dark:border-[var(--border)]">
+          <div className="rounded-xl overflow-hidden bg-white dark:bg-[var(--color-2)] dark:border dark:border-[var(--border)]">
             <div className="px-4 py-2.5 border-b border-gray-100 dark:border-[var(--border)]">
               <span className="text-xs font-semibold text-gray-700 dark:text-gray-200">By Asset</span>
             </div>
@@ -2460,7 +2468,7 @@ function PostedTotalOverview({ batches }: { batches: Batch[] }) {
           </div>
 
           {/* By counterparty */}
-          <div className="rounded-xl overflow-hidden bg-white dark:bg-[var(--color-2)] shadow-sm dark:shadow-none dark:border dark:border-[var(--border)]">
+          <div className="rounded-xl overflow-hidden bg-white dark:bg-[var(--color-2)] dark:border dark:border-[var(--border)]">
             <div className="px-4 py-2.5 border-b border-gray-100 dark:border-[var(--border)]">
               <span className="text-xs font-semibold text-gray-700 dark:text-gray-200">By Counterparty</span>
             </div>
@@ -2563,7 +2571,7 @@ function BatchesLanding({ filteredBatches, onSelectBatch }: BatchesLandingProps)
           { label: 'Pending',  count: pendingCount,  accent: 'text-amber-600 dark:text-amber-400' },
           { label: 'Approved', count: approvedCount, accent: 'text-[var(--color-700)] dark:text-[var(--color-300)]' },
         ].map(({ label, count, accent }) => (
-          <div key={label} className="rounded-xl bg-white dark:bg-[var(--color-2)] shadow-md dark:shadow-[0_8px_24px_rgba(0,0,0,0.5)] px-4 py-3">
+          <div key={label} className="rounded-xl bg-white dark:bg-[var(--color-2)] px-4 py-3">
             <p className={`text-2xs uppercase tracking-wide font-semibold ${accent}`}>{label}</p>
             <p className="text-2xl font-bold tabular-nums mt-1 text-gray-900 dark:text-gray-100">{count}</p>
             <p className="text-2xs text-gray-400 dark:text-gray-500 mt-0.5">batch{count !== 1 ? 'es' : ''}</p>
@@ -2573,21 +2581,21 @@ function BatchesLanding({ filteredBatches, onSelectBatch }: BatchesLandingProps)
 
       {/* Financial KPIs */}
       <div className="grid grid-cols-3 gap-3">
-        <div className="rounded-xl bg-white dark:bg-[var(--color-2)] shadow-md dark:shadow-[0_8px_24px_rgba(0,0,0,0.5)] px-4 py-3">
+        <div className="rounded-xl bg-white dark:bg-[var(--color-2)] px-4 py-3">
           <div className="flex items-center gap-1.5">
             <ArrowUp aria-hidden="true" className="w-3.5 h-3.5 text-[var(--negative)]" strokeWidth={2} />
             <p className="text-2xs uppercase tracking-wide font-semibold text-[var(--negative)]">To deliver</p>
           </div>
           <p className="text-base font-bold tabular-nums mt-1.5 text-gray-900 dark:text-gray-100">{fmtUsdFull(totalDeliver)}</p>
         </div>
-        <div className="rounded-xl bg-white dark:bg-[var(--color-2)] shadow-md dark:shadow-[0_8px_24px_rgba(0,0,0,0.5)] px-4 py-3">
+        <div className="rounded-xl bg-white dark:bg-[var(--color-2)] px-4 py-3">
           <div className="flex items-center gap-1.5">
             <ArrowDown aria-hidden="true" className="w-3.5 h-3.5 text-[var(--positive)]" strokeWidth={2} />
             <p className="text-2xs uppercase tracking-wide font-semibold text-[var(--positive)]">To receive</p>
           </div>
           <p className="text-base font-bold tabular-nums mt-1.5 text-gray-900 dark:text-gray-100">{fmtUsdFull(totalReceive)}</p>
         </div>
-        <div className="rounded-xl bg-white dark:bg-[var(--color-2)] shadow-md dark:shadow-[0_8px_24px_rgba(0,0,0,0.5)] px-4 py-3">
+        <div className="rounded-xl bg-white dark:bg-[var(--color-2)] px-4 py-3">
           <p className="text-2xs uppercase tracking-wide font-semibold text-gray-500 dark:text-gray-400">Net position</p>
           <p className={`text-base font-bold tabular-nums mt-1.5 ${net >= 0 ? 'text-[var(--positive)]' : 'text-[var(--negative)]'}`}>
             {net >= 0 ? '+' : '−'}{fmtUsdFull(Math.abs(net))}
@@ -2596,7 +2604,7 @@ function BatchesLanding({ filteredBatches, onSelectBatch }: BatchesLandingProps)
       </div>
 
       {/* By counterparty */}
-      <div className="rounded-2xl overflow-hidden bg-white dark:bg-[var(--color-2)] shadow-md">
+      <div className="rounded-2xl overflow-hidden bg-white dark:bg-[var(--color-2)]">
         <div className="px-4 py-2.5">
           <span className="text-xs font-semibold text-gray-700 dark:text-gray-200">By counterparty</span>
         </div>
@@ -3427,27 +3435,27 @@ export default function BatchesView({ batches, onBatchesChange, initialBatchId, 
                 { label: 'Pending',  count: pendingCount,  accent: 'text-amber-600 dark:text-amber-400' },
                 { label: 'Approved', count: approvedCount, accent: 'text-[var(--color-700)] dark:text-[var(--color-300)]' },
               ].map(({ label, count, accent }) => (
-                <div key={label} className="rounded-xl bg-white dark:bg-[var(--color-2)] shadow-md dark:shadow-[0_8px_24px_rgba(0,0,0,0.5)] px-4 py-3">
+                <div key={label} className="rounded-xl bg-white dark:bg-[var(--color-2)] px-4 py-3">
                   <p className={`text-2xs uppercase tracking-wide font-semibold ${accent}`}>{label}</p>
                   <p className="text-2xl font-bold tabular-nums mt-1 text-gray-900 dark:text-gray-100">{count}</p>
                   <p className="text-2xs text-gray-400 dark:text-gray-500 mt-0.5">batch{count !== 1 ? 'es' : ''}</p>
                 </div>
               ))}
-              <div className="rounded-xl bg-white dark:bg-[var(--color-2)] shadow-md dark:shadow-[0_8px_24px_rgba(0,0,0,0.5)] px-4 py-3">
+              <div className="rounded-xl bg-white dark:bg-[var(--color-2)] px-4 py-3">
                 <div className="flex items-center gap-1.5">
                   <ArrowUp aria-hidden="true" className="w-3.5 h-3.5 text-[var(--negative)]" strokeWidth={2} />
                   <p className="text-2xs uppercase tracking-wide font-semibold text-[var(--negative)]">To deliver</p>
                 </div>
                 <p className="text-base font-bold tabular-nums mt-1.5 text-gray-900 dark:text-gray-100">{fmtUsdFull(totalDeliver)}</p>
               </div>
-              <div className="rounded-xl bg-white dark:bg-[var(--color-2)] shadow-md dark:shadow-[0_8px_24px_rgba(0,0,0,0.5)] px-4 py-3">
+              <div className="rounded-xl bg-white dark:bg-[var(--color-2)] px-4 py-3">
                 <div className="flex items-center gap-1.5">
                   <ArrowDown aria-hidden="true" className="w-3.5 h-3.5 text-[var(--positive)]" strokeWidth={2} />
                   <p className="text-2xs uppercase tracking-wide font-semibold text-[var(--positive)]">To receive</p>
                 </div>
                 <p className="text-base font-bold tabular-nums mt-1.5 text-gray-900 dark:text-gray-100">{fmtUsdFull(totalReceive)}</p>
               </div>
-              <div className="rounded-xl bg-white dark:bg-[var(--color-2)] shadow-md dark:shadow-[0_8px_24px_rgba(0,0,0,0.5)] px-4 py-3">
+              <div className="rounded-xl bg-white dark:bg-[var(--color-2)] px-4 py-3">
                 <p className="text-2xs uppercase tracking-wide font-semibold text-gray-500 dark:text-gray-400">Net position</p>
                 <p className={`text-base font-bold tabular-nums mt-1.5 ${dashNet >= 0 ? 'text-[var(--positive)]' : 'text-[var(--negative)]'}`}>
                   {dashNet >= 0 ? '+' : '−'}{fmtUsdFull(Math.abs(dashNet))}
@@ -3456,7 +3464,7 @@ export default function BatchesView({ batches, onBatchesChange, initialBatchId, 
             </div>
 
             {/* Batches table */}
-            <div className="rounded-2xl overflow-hidden bg-white dark:bg-[var(--color-2)] shadow-md">
+            <div className="rounded-2xl overflow-hidden bg-white dark:bg-[var(--color-2)]">
               <div className="flex items-center justify-between px-4 py-2.5 border-b border-gray-100 dark:border-[var(--border)]">
                 <span className="text-2xs font-medium text-gray-700 dark:text-gray-200">Batches</span>
                 <span className="text-2xs text-gray-400 dark:text-gray-500 tabular-nums">

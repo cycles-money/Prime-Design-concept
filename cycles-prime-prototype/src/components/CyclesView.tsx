@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, KeyboardEvent } from 'react';
+import React, { useState, useEffect, useCallback, useRef, KeyboardEvent } from 'react';
 import NumberFlow, { NumberFlowGroup } from '@number-flow/react';
 import { mockCycles } from '../data/mockData';
 import type { Cycle, SettlementTarget } from '../types';
@@ -28,7 +28,7 @@ import {
 import { useDarkMode } from '../context/DarkModeContext';
 import {
   Calendar, Timer, History, TrendingUp, Users, RefreshCw, Check, Download,
-  ArrowUp, ArrowDown, ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, Search,
+  ArrowUp, ArrowDown, ChevronDown, ChevronRight, ChevronsDownUp, Search,
 } from 'lucide-react';
 
 // ── Status badge ──────────────────────────────────────────────────────────────
@@ -143,7 +143,7 @@ function PastCycleItem({
   return (
     <button
       onClick={onClick}
-      className={`w-full text-left px-3 py-2.5 rounded-lg transition-colors select-none
+      className={`w-full text-left px-3 py-2 rounded-lg transition-colors select-none
         ${isSelected
           ? 'bg-[oklch(0.910_0.005_264)] dark:bg-[oklch(0.268_0.011_264)]'
           : 'hover:bg-gray-50 dark:hover:bg-white/5'
@@ -151,27 +151,26 @@ function PastCycleItem({
         ${isFocused && !isSelected ? 'ring-1 ring-gray-300 dark:ring-gray-600' : ''}
       `}
     >
-      <div className="flex items-start justify-between">
-        <div>
-          <p className="text-xs font-semibold text-gray-700 dark:text-gray-200">{fmtDate(cycle.date)}</p>
-          <p className="text-[10px] text-gray-400 dark:text-gray-500 mt-0.5">{cycle.scheduledTime}</p>
-        </div>
-        <div className="text-right space-y-0.5">
-          <p className="flex items-center justify-end gap-1 text-[10px] tabular-nums text-[var(--negative)] font-medium">
-            <ArrowUp aria-hidden="true" className="w-3 h-3 flex-shrink-0" strokeWidth={2} />
-            − {fmtUsdCompact(cycle.deliverClearedUsd)}
-            <span className="text-gray-400 dark:text-gray-500 font-normal">
-              {cycle.deliverTotalUsd > 0 ? `${Math.round((cycle.deliverClearedUsd / cycle.deliverTotalUsd) * 100)}%` : '—'}
-            </span>
-          </p>
-          <p className="flex items-center justify-end gap-1 text-[10px] tabular-nums text-[var(--positive)] font-medium">
-            <ArrowDown aria-hidden="true" className="w-3 h-3 flex-shrink-0" strokeWidth={2} />
-            − {fmtUsdCompact(cycle.receiveClearedUsd)}
-            <span className="text-gray-400 dark:text-gray-500 font-normal">
-              {cycle.receiveTotalUsd > 0 ? `${Math.round((cycle.receiveClearedUsd / cycle.receiveTotalUsd) * 100)}%` : '—'}
-            </span>
-          </p>
-        </div>
+      {/* Row 1: date (left) · ↑ Out cleared amount (right) */}
+      <div className="flex items-baseline justify-between gap-2">
+        <p className="text-xs font-semibold text-gray-700 dark:text-gray-200 truncate">{fmtDate(cycle.date)}</p>
+        <span className="inline-flex items-center gap-1 text-[10px] tabular-nums text-gray-500 dark:text-gray-400 flex-shrink-0">
+          <ArrowUp aria-hidden="true" className="w-3 h-3 text-[var(--negative)] flex-shrink-0" strokeWidth={2} />
+          <span>Out</span>
+          <span className="font-semibold text-gray-700 dark:text-gray-200">{fmtUsdCompact(cycle.deliverClearedUsd)}</span>
+        </span>
+      </div>
+
+      {/* Row 2: % cleared (left, under the date) · ↓ In cleared amount (right, under Out) */}
+      <div className="flex items-baseline justify-between gap-2 mt-0.5">
+        <p className="text-[10px] font-medium text-gray-500 dark:text-gray-400 tabular-nums">
+          {cycle.percentCleared}% cleared
+        </p>
+        <span className="inline-flex items-center gap-1 text-[10px] tabular-nums text-gray-500 dark:text-gray-400 flex-shrink-0">
+          <ArrowDown aria-hidden="true" className="w-3 h-3 text-[var(--positive)] flex-shrink-0" strokeWidth={2} />
+          <span>In</span>
+          <span className="font-semibold text-gray-700 dark:text-gray-200">{fmtUsdCompact(cycle.receiveClearedUsd)}</span>
+        </span>
       </div>
     </button>
   );
@@ -285,7 +284,7 @@ function TricklingPanel({
 
 
       {/* Batch readiness */}
-      <div className="bg-white dark:bg-[var(--color-2)] rounded-xl shadow-sm dark:shadow-none dark:border dark:border-[var(--border)] overflow-hidden">
+      <div className="bg-white dark:bg-[var(--color-2)] rounded-xl dark:border dark:border-[var(--border)] overflow-hidden">
         <div className="px-5 py-3.5 border-b border-gray-100 dark:border-[var(--border)] flex items-center justify-between gap-2">
           <div className="flex items-center gap-2">
             <p className="text-xs font-semibold text-gray-700 dark:text-gray-200">Batch readiness</p>
@@ -297,30 +296,16 @@ function TricklingPanel({
             </button>
           </div>
           <div className="flex items-center gap-2">
-            {breakdown === 'asset' && (() => {
-              const assetNames = (() => {
-                const set = new Set<string>();
-                batches.forEach((b) => {
-                  b.deliverObligations.forEach((ob) => set.add(ob.asset));
-                  b.receiveObligations.forEach((ob) => set.add(ob.asset));
-                });
-                return [...set];
-              })();
-              const allExpanded = assetNames.length > 0 && assetNames.every((k) => expandedAssets.has(k));
-              return (
-                <button
-                  onClick={() => setExpandedAssets(allExpanded ? new Set() : new Set(assetNames))}
-                  disabled={assetNames.length === 0}
-                  aria-label={allExpanded ? 'Collapse all' : 'Expand all'}
-                  className="flex items-center gap-1 text-[10px] font-medium text-gray-500 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200 border border-gray-200 dark:border-[var(--border)] hover:border-gray-300 dark:hover:border-gray-500 rounded-full px-2.5 py-1 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-                >
-                  {allExpanded
-                    ? <ChevronsDownUp aria-hidden="true" className="w-3 h-3" strokeWidth={2} />
-                    : <ChevronsUpDown aria-hidden="true" className="w-3 h-3" strokeWidth={2} />}
-                  {allExpanded ? 'Collapse all' : 'Expand all'}
-                </button>
-              );
-            })()}
+            {breakdown === 'asset' && expandedAssets.size > 0 && (
+              <button
+                onClick={() => setExpandedAssets(new Set())}
+                aria-label="Collapse all"
+                className="flex items-center gap-1 text-[10px] font-medium text-gray-500 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200 border border-gray-200 dark:border-[var(--border)] hover:border-gray-300 dark:hover:border-gray-500 rounded-full px-2.5 py-1 transition-colors"
+              >
+                <ChevronsDownUp aria-hidden="true" className="w-3 h-3" strokeWidth={2} />
+                Collapse all
+              </button>
+            )}
             <div className="flex items-center gap-1 bg-gray-100 dark:bg-[var(--surface-3)] rounded-full p-0.5">
               {(['asset', 'batches'] as const).map((v) => (
                 <button
@@ -456,8 +441,7 @@ function TricklingPanel({
                           <table className="w-full text-xs">
                             <thead>
                               <tr className="bg-gray-50 dark:bg-[var(--color-1)] border-b border-gray-100 dark:border-[var(--border)] text-[10px] uppercase tracking-wide text-gray-500 dark:text-gray-400">
-                                <th className="text-left pl-4 pr-2 py-2 font-medium">ID</th>
-                                <th className="text-left px-2 py-2 font-medium">Counterparty</th>
+                                <th className="text-left pl-4 pr-2 py-2 font-medium">Counterparty</th>
                                 <th className="text-right px-2 py-2 font-medium">Posted</th>
                                 <th className="text-right px-2 py-2 font-medium">Delivered</th>
                                 <th className="text-right px-2 py-2 font-medium">Received</th>
@@ -469,8 +453,7 @@ function TricklingPanel({
                             <tbody>
                               {group.rows.map((row, idx) => (
                                 <tr key={row.id} className={idx % 2 === 1 ? 'bg-gray-50/60 dark:bg-[var(--surface-2)]/30' : ''}>
-                                  <td className="pl-4 pr-2 py-1.5 text-[10px] text-gray-400 dark:text-gray-500">{row.id}</td>
-                                  <td className="px-2 py-1.5">
+                                  <td className="pl-4 pr-2 py-1.5">
                                     <div className="flex items-center gap-1.5">
                                       <CounterpartyAvatar name={row.counterparty} size={20} />
                                       <span className={`text-xs font-semibold ${row.side === 'deliver' ? 'text-red-500 dark:text-red-400' : 'text-[var(--positive)]'}`}>
@@ -489,7 +472,7 @@ function TricklingPanel({
                             </tbody>
                             <tfoot>
                               <tr className="bg-gray-50/80 dark:bg-[var(--color-1)]/30 border-t border-gray-100 dark:border-[var(--border)]">
-                                <td colSpan={2} className="pl-4 pr-2 py-1.5 text-[10px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">Subtotal</td>
+                                <td className="pl-4 pr-2 py-1.5 text-[10px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">Subtotal</td>
                                 <td className="px-2 py-1.5 text-right tabular-nums text-[10px] font-medium text-gray-800 dark:text-gray-100">{fmtAssetAmt(group.subtotalPosted, group.asset)}</td>
                                 <td colSpan={2} />
                                 <td className="px-2 py-1.5 text-right tabular-nums text-[10px] font-medium text-gray-800 dark:text-gray-100">{fmtAssetAmt(group.subtotalPosted, group.asset)}</td>
@@ -516,7 +499,7 @@ function TricklingPanel({
       </div>
 
       {/* Eligibility criteria */}
-      <div className="bg-white dark:bg-[var(--color-2)] rounded-xl shadow-sm dark:shadow-none dark:border dark:border-[var(--border)] px-4 py-3">
+      <div className="bg-white dark:bg-[var(--color-2)] rounded-xl dark:border dark:border-[var(--border)] px-4 py-3">
         <p className="text-xs font-semibold text-gray-700 dark:text-gray-200 mb-2">Eligibility criteria</p>
         <ul className="space-y-1.5">
           {[
@@ -591,7 +574,7 @@ export function AccountOverview({
           { icon: <RefreshCw size={14} className="text-[var(--color-300)]" />, label: 'Total cycles', value: String(pastCycles.length) },
           { icon: <Users size={14} className="text-[var(--color-300)]" />, label: 'Counterparties', value: String(allCps.size) },
         ].map(({ icon, label, value }) => (
-          <div key={label} className="bg-white dark:bg-[var(--color-2)] rounded-xl shadow-sm dark:shadow-none dark:border dark:border-[var(--border)] px-5 py-4">
+          <div key={label} className="bg-white dark:bg-[var(--color-2)] rounded-xl dark:border dark:border-[var(--border)] px-5 py-4">
             <div className="flex items-center gap-1.5 mb-2">{icon}<span className="text-[10px] text-gray-400 dark:text-gray-500 uppercase tracking-wide font-medium">{label}</span></div>
             <span className="text-2xl font-bold text-gray-900 dark:text-gray-100 tabular-nums">{value}</span>
           </div>
@@ -599,7 +582,7 @@ export function AccountOverview({
       </div>
 
       {/* Volume cleared total */}
-      <div className="bg-white dark:bg-[var(--color-2)] rounded-xl shadow-sm dark:shadow-none dark:border dark:border-[var(--border)] px-5 py-4">
+      <div className="bg-white dark:bg-[var(--color-2)] rounded-xl dark:border dark:border-[var(--border)] px-5 py-4">
         <p className="text-[10px] text-gray-400 dark:text-gray-500 uppercase tracking-wide font-medium mb-1">Total volume cleared</p>
         <p className="text-xl font-bold text-[var(--positive)] tabular-nums">{fmtUsdFull(totalCleared)}</p>
         <p className="text-[10px] text-gray-400 dark:text-gray-500 tabular-nums mt-1">of {fmtUsdFull(totalVolume)} total obligation volume</p>
@@ -609,7 +592,7 @@ export function AccountOverview({
       </div>
 
       {/* Volume bar chart */}
-      <div className="bg-white dark:bg-[var(--color-2)] rounded-xl shadow-sm dark:shadow-none dark:border dark:border-[var(--border)] overflow-hidden">
+      <div className="bg-white dark:bg-[var(--color-2)] rounded-xl dark:border dark:border-[var(--border)] overflow-hidden">
         <div className="px-5 py-4 border-b border-gray-100 dark:border-[var(--border)]">
           <p className="text-xs font-semibold text-gray-700 dark:text-gray-200">Clearing volume by cycle</p>
           <p className="text-[10px] text-gray-400 dark:text-gray-500 mt-0.5">Last {chartData.length} cycles</p>
@@ -644,16 +627,25 @@ export function AccountOverview({
 
 // ── Custom X-axis tick with crypto icon ──────────────────────────────────────
 
-function AssetXAxisTick({ x, y, payload }: { x?: number; y?: number; payload?: { value: string } }) {
+function AssetXAxisTick({
+  x,
+  y,
+  payload,
+  showLabel = true,
+}: {
+  x?: number;
+  y?: number;
+  payload?: { value: string };
+  showLabel?: boolean;
+}) {
   if (x == null || y == null || !payload) return null;
   const symbol = payload.value;
   const iconUrl = getCryptoIconUrl(symbol);
   const fallbackColor = CRYPTO_COLORS[symbol] ?? '#6b7280';
   const iconSize = 16;
   const gap = 4;
-  // Total row width = icon + gap + estimated text width; center the group on x
-  const textEstW = symbol.length * 7.5;
-  const totalW = iconSize + gap + textEstW;
+  const textEstW = showLabel ? symbol.length * 7.5 : 0;
+  const totalW = iconSize + (showLabel ? gap + textEstW : 0);
   const startX = x - totalW / 2;
   const cy = y + 10;
 
@@ -667,10 +659,16 @@ function AssetXAxisTick({ x, y, payload }: { x?: number; y?: number; payload?: {
       ) : (
         <circle cx={startX + iconSize / 2} cy={cy} r={iconSize / 2} fill={fallbackColor} />
       )}
-      <text x={startX + iconSize + gap} y={cy + 5} textAnchor="start" fontSize={11} fill="#9ca3af">{symbol}</text>
+      {showLabel && (
+        <text x={startX + iconSize + gap} y={cy + 5} textAnchor="start" fontSize={11} fill="#9ca3af">{symbol}</text>
+      )}
     </g>
   );
 }
+
+/** Truncate long category labels for crowded X axes; full label stays in tooltips. */
+const truncateAxisLabel = (v: string, max = 14): string =>
+  v.length > max ? `${v.slice(0, max - 1)}…` : v;
 
 // ── Asset price reference (for converting USD totals → asset units) ──────────
 
@@ -716,7 +714,7 @@ function PreClearingTable({ cycle }: { cycle: Cycle }) {
   const grandTotal = groups.reduce((s, g) => s + g.subtotalUsd, 0);
 
   return (
-    <div className="bg-white dark:bg-[var(--color-2)] rounded-xl shadow-sm dark:shadow-none dark:border dark:border-[var(--border)] overflow-hidden">
+    <div className="bg-white dark:bg-[var(--color-2)] rounded-xl dark:border dark:border-[var(--border)] overflow-hidden">
       <div className="px-5 py-3.5 border-b border-gray-100 dark:border-[var(--border)]">
         <p className="text-xs font-semibold text-gray-700 dark:text-gray-200">Pre-Clearing Obligations</p>
         <p className="text-[10px] text-gray-400 dark:text-gray-500 mt-0.5">Counterparty in red = deliver · green = receive</p>
@@ -863,8 +861,8 @@ function PostClearingTable({ cycle, batches }: { cycle: Cycle; batches: import('
   })();
 
   return (
-    <div className="bg-white dark:bg-[var(--color-2)] rounded-2xl shadow-md overflow-hidden">
-      <div className="px-5 py-3.5 border-b border-gray-100 dark:border-[var(--border)] flex items-center justify-between gap-3">
+    <div className="bg-white dark:bg-[var(--color-2)] rounded-2xl overflow-hidden">
+      <div className="px-5 pt-3.5 flex items-center justify-between gap-3">
         <div className="flex-1 min-w-0">
           <p className="text-xs font-semibold text-gray-700 dark:text-gray-200">Cleared Obligations</p>
           {breakdown !== 'batches' && (
@@ -874,39 +872,33 @@ function PostClearingTable({ cycle, batches }: { cycle: Cycle; batches: import('
           )}
         </div>
         <div className="flex items-center gap-2 flex-shrink-0">
+          {(() => {
+            const expandedSet = breakdown === 'batches' ? expandedBatches : expandedAssets;
+            const setExpanded = breakdown === 'batches' ? setExpandedBatches : setExpandedAssets;
+            if (expandedSet.size === 0) return null;
+            return (
+              <button
+                onClick={() => setExpanded(new Set())}
+                aria-label="Collapse all"
+                className="flex items-center gap-1 text-[10px] font-medium text-gray-500 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200 border border-gray-200 dark:border-[var(--border)] hover:border-gray-300 dark:hover:border-gray-500 rounded-full px-2.5 py-1 transition-colors"
+              >
+                <ChevronsDownUp aria-hidden="true" className="w-3 h-3" strokeWidth={2} />
+                Collapse all
+              </button>
+            );
+          })()}
           {breakdown === 'batches' && (
-            <div className="flex items-center gap-1.5 bg-gray-50 dark:bg-[var(--surface-1)] border border-gray-200 dark:border-[var(--border)] rounded-lg px-2.5 py-1.5">
+            <div className="flex items-center gap-1.5 bg-gray-50 dark:bg-[var(--surface-1)] border border-gray-200 dark:border-[var(--border)] rounded-lg px-2.5 py-1.5 transition-shadow focus-within:border-[var(--color-700)] focus-within:ring-1 focus-within:ring-[oklch(0.683_0.106_127.892_/_0.45)]">
               <Search size={11} className="text-gray-400 dark:text-gray-500 flex-shrink-0" aria-hidden />
               <input
                 type="text"
                 value={cpSearch}
                 onChange={(e) => setCpSearch(e.target.value)}
                 placeholder="Search counterparty…"
-                className="w-36 bg-transparent text-[11px] text-gray-700 dark:text-gray-200 placeholder-gray-400 dark:placeholder-gray-600 outline-none"
+                className="w-36 bg-transparent text-[11px] text-gray-700 dark:text-gray-200 placeholder-gray-400 dark:placeholder-gray-600 focus:outline-none focus:ring-0"
               />
             </div>
           )}
-          {(() => {
-            const allKeys = breakdown === 'batches'
-              ? filteredBatches.map((b) => b.id)
-              : groups.map((g) => g.asset);
-            const expandedSet = breakdown === 'batches' ? expandedBatches : expandedAssets;
-            const allExpanded = allKeys.length > 0 && allKeys.every((k) => expandedSet.has(k));
-            const setExpanded = breakdown === 'batches' ? setExpandedBatches : setExpandedAssets;
-            return (
-              <button
-                onClick={() => setExpanded(allExpanded ? new Set() : new Set(allKeys))}
-                disabled={allKeys.length === 0}
-                aria-label={allExpanded ? 'Collapse all' : 'Expand all'}
-                className="flex items-center gap-1 text-[10px] font-medium text-gray-500 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200 border border-gray-200 dark:border-[var(--border)] hover:border-gray-300 dark:hover:border-gray-500 rounded-full px-2.5 py-1 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-              >
-                {allExpanded
-                  ? <ChevronsDownUp aria-hidden="true" className="w-3 h-3" strokeWidth={2} />
-                  : <ChevronsUpDown aria-hidden="true" className="w-3 h-3" strokeWidth={2} />}
-                {allExpanded ? 'Collapse all' : 'Expand all'}
-              </button>
-            );
-          })()}
           <div className="flex items-center gap-1 bg-gray-100 dark:bg-[var(--surface-3)] rounded-full p-0.5">
             {(['asset', 'batches'] as const).map((v) => (
               <button
@@ -968,9 +960,6 @@ function PostClearingTable({ cycle, batches }: { cycle: Cycle; batches: import('
                             · <span className="text-[var(--positive)]">{batchPct}% cleared</span>
                           </p>
                         </div>
-                        <span className="inline-block rounded px-1.5 py-0.5 text-2xs font-medium leading-tight tabular-nums whitespace-nowrap bg-green-50 dark:bg-green-900/20 text-[var(--positive)] border border-green-200 dark:border-green-800 flex-shrink-0">
-                          Cleared
-                        </span>
                         {isExpanded
                           ? <ChevronDown size={14} className="text-gray-400 dark:text-gray-500 flex-shrink-0" aria-hidden />
                           : <ChevronRight size={14} className="text-gray-400 dark:text-gray-500 flex-shrink-0" aria-hidden />
@@ -1273,7 +1262,7 @@ function CycleDetailPanel({ cycle, batches }: { cycle: Cycle; batches: import('.
           {/* KPI row */}
           <div className="grid grid-cols-2 gap-4">
             {/* Deliver box */}
-            <div className="bg-white dark:bg-[var(--color-2)] rounded-xl shadow-sm dark:shadow-none dark:border dark:border-[var(--border)] px-5 py-4">
+            <div className="bg-white dark:bg-[var(--color-2)] rounded-xl dark:border dark:border-[var(--border)] px-5 py-4">
               <div className="flex items-center gap-1.5 mb-3">
                 <ArrowUp aria-hidden="true" className="w-3.5 h-3.5 text-[var(--negative)]" strokeWidth={2} />
                 <p className="text-[10px] text-[var(--negative)] uppercase tracking-wide font-semibold">To deliver</p>
@@ -1294,7 +1283,7 @@ function CycleDetailPanel({ cycle, batches }: { cycle: Cycle; batches: import('.
               </div>
             </div>
             {/* Receive box */}
-            <div className="bg-white dark:bg-[var(--color-2)] rounded-xl shadow-sm dark:shadow-none dark:border dark:border-[var(--border)] px-5 py-4">
+            <div className="bg-white dark:bg-[var(--color-2)] rounded-xl dark:border dark:border-[var(--border)] px-5 py-4">
               <div className="flex items-center gap-1.5 mb-3">
                 <ArrowDown aria-hidden="true" className="w-3.5 h-3.5 text-[var(--positive)]" strokeWidth={2} />
                 <p className="text-[10px] text-[var(--positive)] uppercase tracking-wide font-semibold">To receive</p>
@@ -1319,7 +1308,7 @@ function CycleDetailPanel({ cycle, batches }: { cycle: Cycle; batches: import('.
           {/* Charts side by side */}
           <div className="grid grid-cols-2 gap-4">
             {/* Bar chart — switches with breakdown */}
-            <div className="bg-white dark:bg-[var(--color-2)] rounded-xl shadow-sm dark:shadow-none dark:border dark:border-[var(--border)] overflow-hidden flex flex-col h-[280px]">
+            <div className="bg-white dark:bg-[var(--color-2)] rounded-xl dark:border dark:border-[var(--border)] overflow-hidden flex flex-col h-[280px]">
               <div className="px-5 py-3 border-b border-gray-100 dark:border-[var(--border)] flex items-center justify-between gap-2 flex-shrink-0">
                 <p className="text-xs font-semibold text-gray-700 dark:text-gray-200">
                   {chartBreakdown === 'counterparty' ? 'By counterparty' : 'By asset'}
@@ -1328,9 +1317,30 @@ function CycleDetailPanel({ cycle, batches }: { cycle: Cycle; batches: import('.
               </div>
               <div className="p-3 flex-1 min-h-0">
                 <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={barData} margin={{ top: 4, right: 4, left: 0, bottom: 18 }}>
+                  <BarChart data={barData} margin={{ top: 4, right: 4, left: 0, bottom: 4 }}>
                     <CartesianGrid strokeDasharray="3 3" stroke={gridStroke} vertical={false} />
-                    <XAxis dataKey="name" tick={chartBreakdown === 'asset' ? <AssetXAxisTick /> : { fontSize: 10, fill: tickColor }} axisLine={false} tickLine={false} interval={0} />
+                    {chartBreakdown === 'counterparty' ? (
+                      <XAxis
+                        dataKey="name"
+                        tick={{ fontSize: 10, fill: tickColor }}
+                        tickFormatter={(v: string) => truncateAxisLabel(v, 12)}
+                        angle={-32}
+                        textAnchor="end"
+                        height={64}
+                        axisLine={false}
+                        tickLine={false}
+                        interval={0}
+                      />
+                    ) : (
+                      <XAxis
+                        dataKey="name"
+                        tick={<AssetXAxisTick showLabel={barData.length <= 8} />}
+                        height={32}
+                        axisLine={false}
+                        tickLine={false}
+                        interval={0}
+                      />
+                    )}
                     <YAxis tickFormatter={(v) => fmtUsdCompact(v)} tick={{ fontSize: 9, fill: tickColor }} axisLine={false} tickLine={false} width={44} />
                     <Tooltip content={<BarTooltip />} cursor={{ fill: 'rgba(128,128,128,0.05)' }} />
                     <Bar dataKey="Cleared" stackId="a" fill={CLR_CLEARED} />
@@ -1349,7 +1359,7 @@ function CycleDetailPanel({ cycle, batches }: { cycle: Cycle; batches: import('.
             </div>
 
             {/* Pie chart — always shows overall clearing split */}
-            <div className="bg-white dark:bg-[var(--color-2)] rounded-xl shadow-sm dark:shadow-none dark:border dark:border-[var(--border)] overflow-hidden flex flex-col h-[280px]">
+            <div className="bg-white dark:bg-[var(--color-2)] rounded-xl dark:border dark:border-[var(--border)] overflow-hidden flex flex-col h-[280px]">
               <div className="px-4 py-2.5 border-b border-gray-100 dark:border-[var(--border)] flex-shrink-0">
                 <p className="text-xs font-semibold text-gray-700 dark:text-gray-200">Clearing split</p>
               </div>
@@ -1400,6 +1410,29 @@ export default function CyclesView({ batches }: CyclesViewProps) {
 
   const [selectedCycle, setSelectedCycle] = useState<Cycle | null>(() => scheduledCycle ?? pastCycles[0] ?? null);
   const [focusedIndex, setFocusedIndex] = useState<number>(-1);
+
+  // Infinite scroll for the past-cycles list.
+  const CYCLE_PAGE = 20;
+  const [visibleCycles, setVisibleCycles] = useState<number>(CYCLE_PAGE);
+  const cycleSentinelRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    setVisibleCycles(CYCLE_PAGE);
+  }, [pastCycles.length]);
+  useEffect(() => {
+    const node = cycleSentinelRef.current;
+    if (!node) return;
+    if (visibleCycles >= pastCycles.length) return;
+    const obs = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((e) => e.isIntersecting)) {
+          setVisibleCycles((v) => Math.min(v + CYCLE_PAGE, pastCycles.length));
+        }
+      },
+      { rootMargin: '200px 0px' },
+    );
+    obs.observe(node);
+    return () => obs.disconnect();
+  }, [visibleCycles, pastCycles.length]);
 
   const handleKeyDown = useCallback(
     (e: KeyboardEvent<HTMLDivElement>) => {
@@ -1457,13 +1490,12 @@ export default function CyclesView({ batches }: CyclesViewProps) {
           )}
 
           {/* ── History section ── */}
-          <div className="px-2 pt-3 pb-1 flex items-center justify-between">
+          <div className="px-2 pt-3 pb-1">
             <span className="text-[10px] text-gray-400 dark:text-gray-600 uppercase tracking-wide font-medium">History</span>
-            <span className="text-[10px] text-gray-400 dark:text-gray-600 uppercase tracking-wide font-medium">Cleared %</span>
           </div>
 
           <div className="space-y-0.5">
-            {pastCycles.map((cycle, i) => (
+            {pastCycles.slice(0, visibleCycles).map((cycle, i) => (
               <PastCycleItem
                 key={cycle.id}
                 cycle={cycle}
@@ -1472,6 +1504,15 @@ export default function CyclesView({ batches }: CyclesViewProps) {
                 onClick={() => { setSelectedCycle(cycle); setFocusedIndex(i); }}
               />
             ))}
+            {visibleCycles < pastCycles.length ? (
+              <div ref={cycleSentinelRef} className="text-center py-3 text-2xs text-gray-400 dark:text-gray-500">
+                Loading more… ({visibleCycles} of {pastCycles.length})
+              </div>
+            ) : pastCycles.length > CYCLE_PAGE ? (
+              <div className="text-center py-3 text-2xs text-gray-400 dark:text-gray-500">
+                End of list — {pastCycles.length} cycles
+              </div>
+            ) : null}
           </div>
         </div>
       </div>

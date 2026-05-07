@@ -43,7 +43,7 @@ function KpiCard({
       ? 'text-gray-500 dark:text-gray-300'
       : '';
   return (
-    <div className="bg-white dark:bg-[var(--color-1)] rounded-2xl shadow-md px-4 py-3 flex flex-col gap-0.5 min-w-[140px]">
+    <div className="bg-white dark:bg-[var(--color-1)] rounded-2xl px-4 py-3 flex flex-col gap-0.5 min-w-[140px]">
       <span className="text-2xs text-gray-500 dark:text-gray-300 uppercase tracking-wide font-medium">{label}</span>
       <span className={`text-xl font-semibold tabular-nums ${accentClass || 'text-gray-900 dark:text-gray-100'}`}>
         {value}
@@ -332,7 +332,7 @@ export default function CycleDetailView({ cycle, onBack }: Props) {
           </div>
 
           {/* ── Charts ────────────────────────────────────────────────── */}
-          <div className="bg-white dark:bg-[var(--color-1)] rounded-2xl shadow-md overflow-hidden">
+          <div className="bg-white dark:bg-[var(--color-1)] rounded-2xl overflow-hidden">
             <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200 dark:border-[var(--border)]">
               <span className="text-xs font-semibold text-gray-700 dark:text-gray-300">Clearing breakdown</span>
               <div className="flex items-center gap-1 bg-gray-100 dark:bg-[var(--surface-3)] rounded p-0.5">
@@ -428,7 +428,7 @@ export default function CycleDetailView({ cycle, onBack }: Props) {
           </div>
 
           {/* ── Breakdown table ────────────────────────────────────────── */}
-          <div className="bg-white dark:bg-[var(--color-1)] rounded-2xl shadow-md overflow-hidden">
+          <div className="bg-white dark:bg-[var(--color-1)] rounded-2xl overflow-hidden">
             <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200 dark:border-[var(--border)]">
               <span className="text-xs font-semibold text-gray-700 dark:text-gray-300">Obligation breakdown</span>
               <div className="flex items-center gap-1 bg-gray-100 dark:bg-[var(--surface-3)] rounded p-0.5">
