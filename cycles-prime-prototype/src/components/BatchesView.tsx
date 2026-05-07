@@ -2738,6 +2738,10 @@ export default function BatchesView({ batches, onBatchesChange, initialBatchId, 
   type BatchSortCol = 'id' | 'counterparty' | 'status' | 'cutoff' | 'obligations' | 'deliver' | 'receive' | 'net';
   const [batchSortCol, setBatchSortCol] = useState<BatchSortCol>('cutoff');
   const [batchSortDir, setBatchSortDir] = useState<'asc' | 'desc'>('desc');
+  // Infinite-scroll window for the dashboard table
+  const ROW_PAGE = 50;
+  const [visibleRows, setVisibleRows] = useState<number>(ROW_PAGE);
+  const sentinelRef = useRef<HTMLTableRowElement>(null);
   const toggleBatchSort = (col: BatchSortCol) => {
     if (batchSortCol === col) setBatchSortDir(d => d === 'asc' ? 'desc' : 'asc');
     else { setBatchSortCol(col); setBatchSortDir('asc'); }
@@ -2879,6 +2883,29 @@ export default function BatchesView({ batches, onBatchesChange, initialBatchId, 
     }
     return batchSortDir === 'asc' ? cmp : -cmp;
   });
+
+  // Reset the infinite-scroll window when the visible dataset shape changes
+  // (length, sort, or filter changes).
+  useEffect(() => {
+    setVisibleRows(ROW_PAGE);
+  }, [sortedBatchTable.length, batchSortCol, batchSortDir]);
+
+  // Bump the window when the sentinel scrolls into view.
+  useEffect(() => {
+    const node = sentinelRef.current;
+    if (!node) return;
+    if (visibleRows >= sortedBatchTable.length) return;
+    const obs = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((e) => e.isIntersecting)) {
+          setVisibleRows((v) => Math.min(v + ROW_PAGE, sortedBatchTable.length));
+        }
+      },
+      { rootMargin: '200px 0px' },
+    );
+    obs.observe(node);
+    return () => obs.disconnect();
+  }, [visibleRows, sortedBatchTable.length]);
 
   const sortTh = (col: BatchSortCol, label: string, className: string) => {
     const active = batchSortCol === col;
@@ -3463,7 +3490,7 @@ export default function BatchesView({ batches, onBatchesChange, initialBatchId, 
                     </tr>
                   </thead>
                   <tbody>
-                    {sortedBatchTable.map(batch => {
+                    {sortedBatchTable.slice(0, visibleRows).map(batch => {
                       const bDeliver = batch.deliverObligations.reduce((s, o) => s + o.amountUsd, 0);
                       const bReceive = batch.receiveObligations.reduce((s, o) => s + o.amountUsd, 0);
                       const bNet = bReceive - bDeliver;
@@ -3494,6 +3521,20 @@ export default function BatchesView({ batches, onBatchesChange, initialBatchId, 
                         </tr>
                       );
                     })}
+                    {/* Infinite-scroll sentinel + footer */}
+                    {visibleRows < sortedBatchTable.length ? (
+                      <tr ref={sentinelRef}>
+                        <td colSpan={8} className="text-center py-4 text-2xs text-gray-400 dark:text-gray-500">
+                          Loading more… ({visibleRows} of {sortedBatchTable.length})
+                        </td>
+                      </tr>
+                    ) : sortedBatchTable.length > ROW_PAGE ? (
+                      <tr>
+                        <td colSpan={8} className="text-center py-3 text-2xs text-gray-400 dark:text-gray-500">
+                          End of list — {sortedBatchTable.length} batches
+                        </td>
+                      </tr>
+                    ) : null}
                   </tbody>
                 </table>
               )}
