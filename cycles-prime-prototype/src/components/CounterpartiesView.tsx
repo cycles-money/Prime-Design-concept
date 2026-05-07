@@ -357,22 +357,22 @@ export default function CounterpartiesView({ batches }: { batches: Batch[] }) {
                       {cp.lynqName || <span className="text-gray-300 dark:text-gray-600">—</span>}
                     </td>
                     <td className="pr-4 py-1.5 text-right">
-                      <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
+                      <div className="flex items-center justify-end gap-2">
                         <button
                           onClick={(e) => { e.stopPropagation(); setEditTarget(cp); }}
                           aria-label={`Edit ${cp.name}`}
-                          className="p-1 rounded-full text-gray-400 dark:text-gray-500 hover:bg-gray-100 dark:hover:bg-[var(--surface-2)] hover:text-gray-700 dark:hover:text-gray-200 transition-colors"
+                          className="opacity-0 group-hover:opacity-100 focus-visible:opacity-100 transition-opacity text-gray-300 dark:text-gray-600 hover:text-gray-600 dark:hover:text-gray-300 p-0.5 rounded"
                         >
                           <Pencil aria-hidden="true" className="w-3 h-3" strokeWidth={2} />
                         </button>
                         <button
                           onClick={(e) => { e.stopPropagation(); setDeleteTarget(cp); }}
                           aria-label={`Delete ${cp.name}`}
-                          className="p-1 rounded-full text-gray-400 dark:text-gray-500 hover:bg-red-50 dark:hover:bg-red-900/20 hover:text-[var(--negative)] transition-colors"
+                          className="opacity-0 group-hover:opacity-100 focus-visible:opacity-100 transition-opacity text-gray-300 dark:text-gray-600 hover:text-red-400 dark:hover:text-red-400 p-0.5 rounded"
                         >
                           <Trash2 aria-hidden="true" className="w-3 h-3" strokeWidth={2} />
                         </button>
-                        <ChevronRight aria-hidden="true" className="w-3 h-3 text-gray-300 dark:text-gray-600" strokeWidth={2} />
+                        <ChevronRight aria-hidden="true" className="w-3 h-3 text-gray-300 dark:text-gray-600 opacity-0 group-hover:opacity-100 transition-opacity" strokeWidth={2} />
                       </div>
                     </td>
                   </tr>
