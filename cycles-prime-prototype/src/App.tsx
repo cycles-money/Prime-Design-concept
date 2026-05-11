@@ -9,9 +9,14 @@ import HelpView from './components/HelpView';
 import CounterpartiesView from './components/CounterpartiesView';
 import { DarkModeContext } from './context/DarkModeContext';
 import { mockBatches, mockCycles } from './data/mockData';
-import type { Batch } from './types';
+import type { Batch, Cycle } from './types';
 
 type Tab = 'batches' | 'cycles' | 'counterparties' | 'settings' | 'help' | 'overview';
+
+const isDemoMode = (): boolean => {
+  try { return new URLSearchParams(window.location.search).get('demo') === '1'; }
+  catch { return false; }
+};
 
 // ── Nav icons ──────────────────────────────────────────────────────────────────
 
@@ -26,7 +31,24 @@ function MoonIcon()          { return <Moon          aria-hidden="true" classNam
 export default function App() {
   const [activeTab, setActiveTab] = useState<Tab>('batches');
   const [batches, setBatches] = useState<Batch[]>(mockBatches);
+  const [cycles, setCycles] = useState<Cycle[]>(mockCycles);
   const [initialBatchId, setInitialBatchId] = useState<string | undefined>(undefined);
+  const [initialCpFilter, setInitialCpFilter] = useState<string | undefined>(undefined);
+  const [batchesKey, setBatchesKey] = useState(0);
+  const [cpKey, setCpKey] = useState(0);
+  const isDemo = isDemoMode();
+
+  // Reset a tab to its main page (clears any deep-link state and forces remount)
+  const goToTab = (tab: Tab) => {
+    if (tab === 'batches') {
+      setInitialBatchId(undefined);
+      setInitialCpFilter(undefined);
+      setBatchesKey((k) => k + 1);
+    } else if (tab === 'counterparties') {
+      setCpKey((k) => k + 1);
+    }
+    setActiveTab(tab);
+  };
   const [isDark, setIsDark] = useState<boolean>(() => {
     const saved = localStorage.getItem('cycles-prime-dark');
     if (saved !== null) return saved === 'true';
@@ -48,13 +70,18 @@ export default function App() {
     return () => window.removeEventListener('navigate-tab', handler);
   }, []);
 
+  // Navigate to the batches page, optionally drilling into a specific batch
+  // and/or pre-applying a counterparty filter. Either field may be omitted —
+  // e.g. the Counterparties list dispatches { cpName } only.
   useEffect(() => {
     const handler = (e: Event) => {
-      const batchId = (e as CustomEvent<string>).detail;
-      if (batchId) {
-        setInitialBatchId(batchId);
-        setActiveTab('batches');
-      }
+      const detail = (e as CustomEvent<string | { batchId?: string; cpName?: string }>).detail;
+      const batchId = typeof detail === 'string' ? detail : detail?.batchId;
+      const cpName = typeof detail === 'string' ? undefined : detail?.cpName;
+      if (!batchId && !cpName) return;
+      setInitialBatchId(batchId);
+      setInitialCpFilter(cpName);
+      setActiveTab('batches');
     };
     window.addEventListener('navigate-to-batch', handler);
     return () => window.removeEventListener('navigate-to-batch', handler);
@@ -70,12 +97,12 @@ export default function App() {
       </a>
       <div className="flex flex-col h-screen font-sans overflow-hidden bg-gray-50 dark:bg-[var(--color-1)] transition-colors duration-150">
         {/* ── Top navigation bar ──────────────────────────────────────────── */}
-        <header className="bg-white dark:bg-black border-b border-gray-200 dark:border-[var(--border)] relative flex items-center flex-shrink-0 h-12 transition-colors duration-150 px-3">
+        <header className="bg-white dark:bg-black shadow-sm border-b border-gray-200 dark:border-[var(--border)] relative flex items-center flex-shrink-0 h-12 transition-colors duration-150 px-3">
 
           {/* Brand */}
           <div className="flex items-center flex-shrink-0">
           <button
-            onClick={() => setActiveTab('batches')}
+            onClick={() => goToTab('batches')}
             aria-label="Go to Batches"
             className="flex items-center gap-2"
           >
@@ -116,10 +143,10 @@ export default function App() {
               return (
                 <button
                   key={tab}
-                  onClick={() => setActiveTab(tab)}
+                  onClick={() => goToTab(tab)}
                   className={`flex items-center gap-1.5 px-3.5 h-8 rounded-full text-xs font-medium transition-[background-color,color,border-color,transform] duration-150 active:scale-[0.97]
                     ${isActive
-                      ? 'bg-[var(--color-50)] dark:bg-[var(--color-950)]/20 text-gray-800 dark:text-[var(--color-300)]'
+                      ? 'bg-[oklch(0.910_0.005_264)] dark:bg-[oklch(0.268_0.011_264)] text-gray-900 dark:text-gray-100'
                       : 'hover-item text-gray-500 dark:text-gray-300 hover:text-gray-800 dark:hover:text-gray-200'
                     }`}
                 >
@@ -140,7 +167,7 @@ export default function App() {
               title="Settings"
               className={`w-8 h-8 flex items-center justify-center rounded-full transition-[background-color,color,border-color,transform] duration-150 active:scale-[0.97]
                 ${activeTab === 'settings'
-                  ? 'bg-[var(--color-50)] dark:bg-[var(--color-950)]/20 text-gray-800 dark:text-[var(--color-300)]'
+                  ? 'bg-[oklch(0.910_0.005_264)] dark:bg-[oklch(0.268_0.011_264)] text-gray-900 dark:text-gray-100'
                   : 'hover-item text-gray-500 dark:text-gray-300 hover:text-gray-700 dark:hover:text-gray-300'
                 }`}
             >
@@ -154,7 +181,7 @@ export default function App() {
               title="Help"
               className={`w-8 h-8 flex items-center justify-center rounded-full transition-[background-color,color,border-color,transform] duration-150 active:scale-[0.97]
                 ${activeTab === 'help'
-                  ? 'bg-[var(--color-50)] dark:bg-[var(--color-950)]/20 text-gray-800 dark:text-[var(--color-300)]'
+                  ? 'bg-[oklch(0.910_0.005_264)] dark:bg-[oklch(0.268_0.011_264)] text-gray-900 dark:text-gray-100'
                   : 'hover-item text-gray-500 dark:text-gray-300 hover:text-gray-700 dark:hover:text-gray-300'
                 }`}
             >
@@ -180,9 +207,9 @@ export default function App() {
 
         {/* ── Main content ─────────────────────────────────────────────────── */}
         <main id="main-content" className="flex-1 overflow-hidden">
-          {activeTab === 'batches'        ? <BatchesView batches={batches} onBatchesChange={setBatches} initialBatchId={initialBatchId} />
-          : activeTab === 'cycles'         ? <CyclesView batches={batches} />
-          : activeTab === 'counterparties' ? <CounterpartiesView batches={batches} />
+          {activeTab === 'batches'        ? <BatchesView key={batchesKey} batches={batches} onBatchesChange={setBatches} initialBatchId={initialBatchId} initialCpFilter={initialCpFilter} isDemo={isDemo} />
+          : activeTab === 'cycles'         ? <CyclesView batches={batches} cycles={cycles} onCyclesChange={setCycles} isDemo={isDemo} />
+          : activeTab === 'counterparties' ? <CounterpartiesView key={cpKey} batches={batches} />
           : activeTab === 'settings'       ? <SettingsView />
           : activeTab === 'overview'       ? (
               <div className="flex flex-col h-full overflow-hidden bg-gray-50 dark:bg-[var(--color-1)]">
@@ -203,7 +230,7 @@ export default function App() {
                 </div>
                 <div className="flex-1 overflow-hidden">
                   <AccountOverview
-                    cycles={mockCycles}
+                    cycles={cycles}
                     batches={batches}
                     onSelectCycle={() => setActiveTab('cycles')}
                   />

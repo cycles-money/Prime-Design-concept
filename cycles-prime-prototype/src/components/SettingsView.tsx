@@ -177,7 +177,7 @@ export default function SettingsView() {
             <div className="bg-[var(--color-50)] dark:bg-[var(--color-950)]/10 border border-[var(--color-200)] dark:border-[var(--color-900)] rounded-lg p-4">
               <p className="text-2xs text-[var(--color-800)] dark:text-[var(--color-300)] leading-relaxed">
                 Settlements use the Lynq{' '}
-                <code className="font-mono bg-[var(--color-50)] dark:bg-[var(--color-950)]/30 px-1 rounded">/v1/send/request</code>{' '}
+                <code className="bg-[var(--color-50)] dark:bg-[var(--color-950)]/30 px-1 rounded">/v1/send/request</code>{' '}
                 endpoint. Ensure your API key has <strong>send</strong> permissions enabled in your Lynq dashboard.
               </p>
             </div>
@@ -202,7 +202,7 @@ export default function SettingsView() {
             onClick={(e) => { e.preventDefault(); window.dispatchEvent(new CustomEvent('navigate-tab', { detail: 'overview' })); }}
             className="flex-shrink-0 flex items-center gap-1 text-2xs font-medium text-[var(--color-800)] dark:text-[var(--color-300)] hover:underline"
           >
-            Open Overview
+            Open overview
             <ChevronRight aria-hidden="true" className="w-3 h-3" strokeWidth={2.5} />
           </a>
         </div>
@@ -225,7 +225,7 @@ export default function SettingsView() {
             onClick={(e) => { e.preventDefault(); window.dispatchEvent(new CustomEvent('navigate-tab', { detail: 'counterparties' })); }}
             className="flex-shrink-0 flex items-center gap-1 text-2xs font-medium text-[var(--color-800)] dark:text-[var(--color-300)] hover:underline"
           >
-            Go to Counterparties
+            Go to counterparties
             <ChevronRight aria-hidden="true" className="w-3 h-3" strokeWidth={2.5} />
           </a>
         </div>

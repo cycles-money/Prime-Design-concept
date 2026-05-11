@@ -170,21 +170,9 @@ body {
   color: var(--color-11);
 }
 
-/* Deliver row accent */
-.row-deliver {
-  border-left: 0.5px solid #fda4af;
-}
-.dark .row-deliver {
-  border-left: 0.5px solid #fb7185;
-}
-
-/* Receive row accent */
-.row-receive {
-  border-left: 0.5px solid #6ee7b7;
-}
-.dark .row-receive {
-  border-left: 0.5px solid #34d399;
-}
+/* Deliver / Receive row accents — left border intentionally removed */
+.row-deliver {}
+.row-receive {}
 
 /* Cleared progress bar */
 .cleared-bar {
@@ -271,17 +259,20 @@ body {
 @media (hover: hover) and (pointer: fine) {
   /* Table rows: obligation lines, cycles, counterparties, dimensions */
   .hover-row:hover {
-    background-color: oklch(0.910 0.005 264);        /* between color-12 and color-11 */
+    background-color: oklch(0.950 0.003 264);        /* lighter — hover preview */
   }
   .dark .hover-row:hover {
-    background-color: oklch(0.248 0.010 264 / 0.55); /* color-3 at 55% — subtle lift on color-1 panels */
+    background-color: oklch(0.210 0.009 264 / 0.55);
   }
 
   /* List / menu items: batch sidebar, status dropdown, cancel buttons */
   .hover-item:hover {
-    background-color: oklch(0.910 0.005 264);        /* between color-12 and color-11 */
+    background-color: oklch(0.950 0.003 264);        /* lighter — hover preview */
   }
   .dark .hover-item:hover {
-    background-color: oklch(0.268 0.011 264);        /* color-3 equivalent — solid lift */
+    background-color: oklch(0.210 0.009 264);
   }
 }
+
+.no-scrollbar { scrollbar-width: none; }
+.no-scrollbar::-webkit-scrollbar { display: none; }
