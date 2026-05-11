@@ -33,6 +33,14 @@ export interface Batch {
   deliverObligations: Obligation[];
   receiveObligations: Obligation[];
   activity?: ActivityEntry[];
+  /** Who needs to act on a Pending batch. Defaults to 'recipient' when undefined. */
+  awaiting?: 'sender' | 'recipient';
+  /** Snapshot of the obligations BEFORE the latest amendment. Set when a party
+   *  proposes changes and bounces the batch back; cleared on accept / reject. */
+  amendmentBaseline?: {
+    deliverObligations: Obligation[];
+    receiveObligations: Obligation[];
+  };
 }
 
 export interface ObligationByDimension {

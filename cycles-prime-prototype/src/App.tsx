@@ -9,9 +9,14 @@ import HelpView from './components/HelpView';
 import CounterpartiesView from './components/CounterpartiesView';
 import { DarkModeContext } from './context/DarkModeContext';
 import { mockBatches, mockCycles } from './data/mockData';
-import type { Batch } from './types';
+import type { Batch, Cycle } from './types';
 
 type Tab = 'batches' | 'cycles' | 'counterparties' | 'settings' | 'help' | 'overview';
+
+const isDemoMode = (): boolean => {
+  try { return new URLSearchParams(window.location.search).get('demo') === '1'; }
+  catch { return false; }
+};
 
 // ── Nav icons ──────────────────────────────────────────────────────────────────
 
@@ -26,10 +31,12 @@ function MoonIcon()          { return <Moon          aria-hidden="true" classNam
 export default function App() {
   const [activeTab, setActiveTab] = useState<Tab>('batches');
   const [batches, setBatches] = useState<Batch[]>(mockBatches);
+  const [cycles, setCycles] = useState<Cycle[]>(mockCycles);
   const [initialBatchId, setInitialBatchId] = useState<string | undefined>(undefined);
   const [initialCpFilter, setInitialCpFilter] = useState<string | undefined>(undefined);
   const [batchesKey, setBatchesKey] = useState(0);
   const [cpKey, setCpKey] = useState(0);
+  const isDemo = isDemoMode();
 
   // Reset a tab to its main page (clears any deep-link state and forces remount)
   const goToTab = (tab: Tab) => {
@@ -200,8 +207,8 @@ export default function App() {
 
         {/* ── Main content ─────────────────────────────────────────────────── */}
         <main id="main-content" className="flex-1 overflow-hidden">
-          {activeTab === 'batches'        ? <BatchesView key={batchesKey} batches={batches} onBatchesChange={setBatches} initialBatchId={initialBatchId} initialCpFilter={initialCpFilter} />
-          : activeTab === 'cycles'         ? <CyclesView batches={batches} />
+          {activeTab === 'batches'        ? <BatchesView key={batchesKey} batches={batches} onBatchesChange={setBatches} initialBatchId={initialBatchId} initialCpFilter={initialCpFilter} isDemo={isDemo} />
+          : activeTab === 'cycles'         ? <CyclesView batches={batches} cycles={cycles} onCyclesChange={setCycles} isDemo={isDemo} />
           : activeTab === 'counterparties' ? <CounterpartiesView key={cpKey} batches={batches} />
           : activeTab === 'settings'       ? <SettingsView />
           : activeTab === 'overview'       ? (
@@ -223,7 +230,7 @@ export default function App() {
                 </div>
                 <div className="flex-1 overflow-hidden">
                   <AccountOverview
-                    cycles={mockCycles}
+                    cycles={cycles}
                     batches={batches}
                     onSelectCycle={() => setActiveTab('cycles')}
                   />

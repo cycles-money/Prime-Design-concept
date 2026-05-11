@@ -13,7 +13,7 @@ import LinkSettlementModal from './LinkSettlementModal';
 import { fmtUsdCompact, fmtUsdFull, fmtAsset, fmtDate, fmtCutoff, getCountdownParts } from '../utils/formatters';
 import { CryptoIcon } from './CryptoIcon';
 import { CounterpartyAvatar } from './CounterpartyAvatar';
-import { ChevronDown, ChevronRight, Info, Check, Pencil, ArrowUp, ArrowDown, Upload, AlertCircle, FileText, X, CheckCircle, Plus, Calendar, TrendingUp, History, RefreshCw, Trash2, Filter, Search, Users } from 'lucide-react';
+import { ChevronDown, ChevronRight, Info, Check, Pencil, ArrowUp, ArrowDown, ArrowUpRight, ArrowDownLeft, Upload, AlertCircle, FileText, X, CheckCircle, Plus, Calendar, TrendingUp, History, RefreshCw, Trash2, Filter, Search, Users } from 'lucide-react';
 import NumberFlow, { NumberFlowGroup } from '@number-flow/react';
 
 // ── Lynq eligibility ──────────────────────────────────────────────────────────
@@ -83,6 +83,25 @@ function StatusBadge({ status }: { status: BatchStatus; pct?: number }) {
   );
 }
 
+// ── Origin marker (Sent / Received) ──────────────────────────────────────────
+
+function OriginPill({ origin }: { origin?: 'created' | 'requested' }) {
+  if (!origin) return null;
+  const isSent = origin === 'created';
+  const Icon = isSent ? ArrowUpRight : ArrowDownLeft;
+  const label = isSent ? 'Sent' : 'Received';
+  return (
+    <span
+      title={isSent ? 'You sent this batch' : 'Sent to you by counterparty'}
+      aria-label={label}
+      className="inline-flex items-center gap-0.5 text-[10px] text-gray-400 dark:text-gray-500 leading-tight whitespace-nowrap"
+    >
+      <Icon aria-hidden="true" className="w-2.5 h-2.5" strokeWidth={2} />
+      {label}
+    </span>
+  );
+}
+
 // ── Status transition rules ─────────────────────────────────────────────────
 
 const STATUS_ORDER: BatchStatus[] = ['Draft', 'Pending', 'Approved', 'Cleared', 'Rejected', 'Cancelled', 'Revoked', 'Deleted'];
@@ -100,6 +119,41 @@ const TRANSITIONS: Record<BatchStatus, BatchStatus[]> = {
 
 const isDowngrade = (from: BatchStatus, to: BatchStatus) =>
   STATUS_ORDER.indexOf(to) < STATUS_ORDER.indexOf(from);
+
+// ── Activity log helpers ─────────────────────────────────────────────────────
+
+function appendActivity(
+  batch: Batch,
+  entry: { type: ActivityEventType; description: string; user?: string },
+): Batch {
+  const newEntry: ActivityEntry = {
+    id: `${batch.id}-${entry.type}-${Date.now()}`,
+    timestamp: new Date().toISOString(),
+    type: entry.type,
+    description: entry.description,
+    user: entry.user ?? 'You',
+  };
+  return { ...batch, activity: [newEntry, ...(batch.activity ?? [])] };
+}
+
+function transitionStatus(batch: Batch, status: BatchStatus, description: string): Batch {
+  return appendActivity({ ...batch, status }, { type: 'status_change', description });
+}
+
+// ── New-batch cutoff helpers ────────────────────────────────────────────────
+
+/** datetime-local string ('YYYY-MM-DDTHH:00') for the next scheduled cycle's cutoff. */
+function getNextCycleCutoffLocal(): string {
+  const next = mockCycles.find(c => c.isScheduled);
+  if (!next) return '';
+  const hh = String(next.scheduledHourUtc).padStart(2, '0');
+  return `${next.date}T${hh}:00`;
+}
+
+/** Convert datetime-local input ('YYYY-MM-DDTHH:MM') to fmtCutoff format ('YYYY-MM-DD HH:MM'). */
+function cutoffTimeFromDatetimeLocal(s: string): string {
+  return s.replace('T', ' ').slice(0, 16);
+}
 
 // ── Status selector (interactive badge + dropdown) ────────────────────────────
 
@@ -402,6 +456,11 @@ interface CombinedObligationTableProps {
   onSettleWithLynq: (ob: Obligation) => void;
   onAddObligation?: (ob: Obligation, dir: 'deliver' | 'receive') => void;
   onRemoveObligation?: (dir: 'deliver' | 'receive', index: number) => void;
+  /** Whether amount inputs are editable. When false, values render as static text. */
+  isEditable: boolean;
+  /** Optional pre-amendment snapshot. When present, rows whose amounts differ
+   *  from the baseline render a small "was X" caption. */
+  baseline?: { deliverObligations: Obligation[]; receiveObligations: Obligation[] };
 }
 
 function CombinedObligationTable({
@@ -415,6 +474,8 @@ function CombinedObligationTable({
   onSettleWithLynq,
   onAddObligation,
   onRemoveObligation,
+  isEditable,
+  baseline,
 }: CombinedObligationTableProps) {
   const [showClearedTip, setShowClearedTip] = useState(false);
 
@@ -458,7 +519,6 @@ function CombinedObligationTable({
     ob.remainingUsd > 0 &&
     LYNQ_CONTACTS.has(counterpartyName);
 
-  const isEditable = batchStatus === 'Draft' || batchStatus === 'Pending';
   const allObligations = [...deliverObligations, ...receiveObligations];
   const anyLynqEligible = allObligations.some(isLynqEligible);
   const anyRefNumber = allObligations.some(o => !!o.refNumber);
@@ -597,8 +657,8 @@ function CombinedObligationTable({
                   <thead>
                     <tr className="bg-gray-50 dark:bg-[#0C0D0F] text-gray-500 dark:text-gray-400 border-b border-gray-100 dark:border-[var(--border)] text-[10px] uppercase tracking-wide">
                       <th className="text-left pl-4 pr-2 py-2 font-medium w-20">Asset</th>
-                      <th className="text-right px-2 py-2 font-medium">Amount</th>
-                      <th className="text-right px-2 py-2 font-medium text-gray-400 dark:text-gray-500">USD</th>
+                      <th className="text-right px-2 py-2 font-medium min-w-[12rem]">Amount</th>
+                      <th className="text-right px-2 py-2 font-medium text-gray-400 dark:text-gray-500 min-w-[10rem]">USD</th>
                       {anyRefNumber && <th className="text-left px-2 py-2 font-medium">Ref</th>}
                       {showClearing && (
                         <th className="text-right px-2 py-2 font-medium relative">
@@ -645,7 +705,11 @@ function CombinedObligationTable({
                     )}
 
                     {/* Obligation rows */}
-                    {filteredObligations.map((ob, idx) => (
+                    {filteredObligations.map((ob, idx) => {
+                      const baselineList = baseline ? (isDeliver ? baseline.deliverObligations : baseline.receiveObligations) : undefined;
+                      const baselineOb = baselineList?.[idx];
+                      const amountChanged = baselineOb !== undefined && baselineOb.amountAsset !== ob.amountAsset;
+                      return (
                       <tr
                         key={`${dir}-${idx}`}
                         className={`group hover-row border-b border-gray-50 dark:border-[var(--border)] last:border-b-0 transition-colors ${isDeliver ? 'row-deliver' : 'row-receive'}`}
@@ -705,13 +769,18 @@ function CombinedObligationTable({
                                   update(idx, 'remainingUsd', (v * price) - ob.clearedUsd);
                                 }
                               }}
-                              className="w-28 text-right text-[11px] font-medium bg-transparent border border-transparent hover:border-gray-200 dark:hover:border-[var(--border)] focus:border-[var(--color-700)] focus:outline-none rounded px-1.5 py-0.5 text-gray-800 dark:text-gray-200 tabular-nums"
+                              className="w-full text-right text-[11px] font-medium bg-transparent border border-transparent hover:border-gray-200 dark:hover:border-[var(--border)] focus:border-[var(--color-700)] dark:focus:border-[var(--color-700)] focus:outline-none rounded px-1.5 py-0.5 text-gray-800 dark:text-gray-200 tabular-nums"
                               aria-label="Amount"
                             />
                           ) : (
                             <span className="font-medium text-gray-800 dark:text-gray-100">
                               {ob.amountAsset.toLocaleString(undefined, { maximumFractionDigits: 8 })}
                             </span>
+                          )}
+                          {amountChanged && (
+                            <div className="text-[9px] text-amber-600 dark:text-amber-400 leading-tight tabular-nums mt-0.5">
+                              was {baselineOb!.amountAsset.toLocaleString(undefined, { maximumFractionDigits: 8 })}
+                            </div>
                           )}
                         </td>
 
@@ -749,7 +818,7 @@ function CombinedObligationTable({
                                   update(idx, 'remainingAsset', asset - ob.clearedAsset);
                                 }
                               }}
-                              className="w-28 text-right text-[11px] bg-transparent border border-transparent hover:border-gray-200 dark:hover:border-[var(--border)] focus:border-[var(--color-700)] focus:outline-none rounded px-1.5 py-0.5 text-gray-400 dark:text-gray-500 tabular-nums"
+                              className="w-full text-right text-[11px] bg-transparent border border-transparent hover:border-gray-200 dark:hover:border-[var(--border)] focus:border-[var(--color-700)] dark:focus:border-[var(--color-700)] focus:outline-none rounded px-1.5 py-0.5 text-gray-400 dark:text-gray-500 tabular-nums"
                               aria-label="USD value"
                             />
                           ) : (
@@ -822,7 +891,8 @@ function CombinedObligationTable({
                           </div>
                         </td>
                       </tr>
-                    ))}
+                      );
+                    })}
 
                     {/* Inline new-row form */}
                     {newRow?.dir === dir && (
@@ -969,6 +1039,26 @@ interface BatchDetailProps {
   batch: Batch;
   onUpdate: (updated: Batch) => void;
   onDelete?: (id: string) => void;
+  isDemo?: boolean;
+}
+
+// ── Amendment helpers ───────────────────────────────────────────────────────
+
+/** A Pending batch's awaiting party defaults to 'recipient' when undefined. */
+function getAwaiting(b: Batch): 'sender' | 'recipient' {
+  return b.awaiting ?? 'recipient';
+}
+
+/** Is the current user the awaiting party for this batch? */
+function isMyTurn(b: Batch): boolean {
+  if (b.status !== 'Pending') return false;
+  const aw = getAwaiting(b);
+  return (b.origin === 'created' && aw === 'sender') || (b.origin === 'requested' && aw === 'recipient');
+}
+
+/** Quick clone of an obligations array for snapshotting before amend mode. */
+function cloneObligations(list: Obligation[]): Obligation[] {
+  return list.map((o) => ({ ...o }));
 }
 
 // ── Activity card ─────────────────────────────────────────────────────────────
@@ -1044,11 +1134,90 @@ function ActivityCard({ entries }: { entries: ActivityEntry[] }) {
   );
 }
 
-function BatchDetail({ batch, onUpdate, onDelete }: BatchDetailProps) {
+function BatchDetail({ batch, onUpdate, onDelete, isDemo }: BatchDetailProps) {
   const [showGuide, setShowGuide] = useState(false);
   const [settlementTarget, setSettlementTarget] = useState<SettlementTarget | null>(null);
   const [confirmingReject, setConfirmingReject] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
+
+  // Amend / counter-propose mode. Snapshot is taken when entering the mode so
+  // we can revert if the user cancels. On Send proposal, the snapshot becomes
+  // the persisted `batch.amendmentBaseline` for the other party to diff against.
+  const [amendSnapshot, setAmendSnapshot] = useState<{ deliverObligations: Obligation[]; receiveObligations: Obligation[] } | null>(null);
+  const inAmendMode = amendSnapshot !== null;
+
+  // Reset amend state if the selected batch changes (user navigates away).
+  useEffect(() => {
+    setAmendSnapshot(null);
+  }, [batch.id]);
+
+  const myTurn = isMyTurn(batch);
+  const hasAmendment = !!batch.amendmentBaseline;
+
+  const enterAmendMode = () => {
+    setAmendSnapshot({
+      deliverObligations: cloneObligations(batch.deliverObligations),
+      receiveObligations: cloneObligations(batch.receiveObligations),
+    });
+  };
+
+  const cancelAmendment = () => {
+    if (!amendSnapshot) return;
+    onUpdate({
+      ...batch,
+      deliverObligations: amendSnapshot.deliverObligations,
+      receiveObligations: amendSnapshot.receiveObligations,
+    });
+    setAmendSnapshot(null);
+  };
+
+  const submitAmendment = () => {
+    if (!amendSnapshot) return;
+    const isCounter = !!batch.amendmentBaseline;
+    const description = isCounter ? 'Counter-proposed changes' : 'Proposed changes';
+    const updated: Batch = {
+      ...batch,
+      amendmentBaseline: amendSnapshot,
+      // Flip awaiting to the other side.
+      awaiting: getAwaiting(batch) === 'recipient' ? 'sender' : 'recipient',
+    };
+    onUpdate(appendActivity(updated, { type: 'status_change', description }));
+    setAmendSnapshot(null);
+  };
+
+  const acceptAmendment = () => {
+    const description = batch.amendmentBaseline ? 'Accepted changes' : 'Approved batch';
+    const updated: Batch = { ...batch, status: 'Approved', amendmentBaseline: undefined, awaiting: undefined };
+    onUpdate(appendActivity(updated, { type: 'status_change', description }));
+  };
+
+  // Demo simulator: receiver proposes a ±10% tweak and bounces back to us.
+  const simulateCounterpartyEdit = () => {
+    if (!isDemo) return;
+    if (batch.status !== 'Pending') return;
+    const tweak = (n: number) => Math.max(0, Math.round(n * (0.9 + Math.random() * 0.2)));
+    const tweakObligation = (o: Obligation): Obligation => {
+      const newAsset = tweak(o.amountAsset);
+      const price = ASSET_USD[o.asset] ?? 1;
+      const newUsd = newAsset * price;
+      return { ...o, amountAsset: newAsset, amountUsd: newUsd, remainingAsset: newAsset - o.clearedAsset, remainingUsd: newUsd - o.clearedUsd };
+    };
+    const baseline = {
+      deliverObligations: cloneObligations(batch.deliverObligations),
+      receiveObligations: cloneObligations(batch.receiveObligations),
+    };
+    // Tweak the first non-empty deliver and receive obligation.
+    const newDeliver = batch.deliverObligations.map((o, i) => (i === 0 ? tweakObligation(o) : o));
+    const newReceive = batch.receiveObligations.map((o, i) => (i === 0 ? tweakObligation(o) : o));
+    const updated: Batch = {
+      ...batch,
+      deliverObligations: newDeliver,
+      receiveObligations: newReceive,
+      amendmentBaseline: baseline,
+      awaiting: getAwaiting(batch) === 'recipient' ? 'sender' : 'recipient',
+    };
+    onUpdate(appendActivity(updated, { type: 'status_change', description: `${batch.counterpartyName} proposed changes` , user: batch.counterpartyName }));
+  };
 
   const handleSettleWithLynq = (ob: Obligation) => {
     setSettlementTarget({
@@ -1105,16 +1274,34 @@ function BatchDetail({ batch, onUpdate, onDelete }: BatchDetailProps) {
     }
   };
 
-  // Determine the primary CTA based on current status + origin
+  // Determine the primary CTA based on current status + origin + amendment state.
   const primaryCta =
     batch.status === 'Draft' && batch.origin === 'created'
-      ? { label: 'Send to counterparty', icon: <ChevronRight aria-hidden="true" className="w-4 h-4" strokeWidth={2.5} />, action: () => onUpdate({ ...batch, status: 'Pending' }), prominent: false }
-    : batch.status === 'Pending' && batch.origin === 'requested'
-      ? { label: 'Approve batch', icon: <Check aria-hidden="true" className="w-4 h-4" strokeWidth={2.5} />, action: () => onUpdate({ ...batch, status: 'Approved' }), prominent: true }
+      ? { label: 'Send to counterparty', icon: <ChevronRight aria-hidden="true" className="w-4 h-4" strokeWidth={2.5} />, action: () => onUpdate(transitionStatus(batch, 'Pending', 'Sent to counterparty')), prominent: false }
+    : batch.status === 'Pending' && myTurn && hasAmendment
+      ? { label: 'Accept changes', icon: <Check aria-hidden="true" className="w-4 h-4" strokeWidth={2.5} />, action: acceptAmendment, prominent: true }
+    : batch.status === 'Pending' && myTurn && !hasAmendment
+      ? { label: 'Approve batch', icon: <Check aria-hidden="true" className="w-4 h-4" strokeWidth={2.5} />, action: () => onUpdate(transitionStatus({ ...batch, awaiting: undefined }, 'Approved', 'Approved batch')), prominent: true }
     : null;
 
   return (
-    <div className="h-full overflow-y-auto bg-gray-50 dark:bg-[var(--color-1)]">
+    <div className="h-full flex flex-col bg-gray-50 dark:bg-[var(--color-1)]">
+      {/* Amendment-review banner — shown to the awaiting party when an outstanding amendment exists. */}
+      {hasAmendment && myTurn && !inAmendMode && (
+        <div className="flex-shrink-0 bg-amber-50/70 dark:bg-amber-900/15 border-b border-amber-200 dark:border-amber-800 px-5 py-2 flex items-center gap-2 text-xs text-amber-800 dark:text-amber-300">
+          <Pencil aria-hidden="true" className="w-3.5 h-3.5 flex-shrink-0" strokeWidth={2} />
+          <span><span className="font-semibold">{batch.counterpartyName} proposed changes.</span> Updated rows show the previous value below.</span>
+        </div>
+      )}
+      {/* Amend-mode banner — shown while you're editing your proposal. */}
+      {inAmendMode && (
+        <div className="flex-shrink-0 bg-[var(--color-50)] dark:bg-[var(--color-950)]/30 border-b border-[var(--color-200)] dark:border-[var(--color-700)] px-5 py-2 flex items-center gap-2 text-xs text-[var(--color-800)] dark:text-[var(--color-300)]">
+          <Pencil aria-hidden="true" className="w-3.5 h-3.5 flex-shrink-0" strokeWidth={2} />
+          <span className="font-semibold">Editing your proposal</span>
+          <span className="text-gray-500 dark:text-gray-400">— change amounts inline, then send.</span>
+        </div>
+      )}
+      <div className="flex-1 overflow-y-auto">
 
       {/* ── Batch header ─────────────────────────────────────────────────── */}
       <div className="mt-4 mx-4">
@@ -1128,29 +1315,53 @@ function BatchDetail({ batch, onUpdate, onDelete }: BatchDetailProps) {
                 {batch.counterpartyName}
               </span>
             </div>
-            <div className="flex items-center gap-2 mt-0.5">
-              <span className="text-2xs text-gray-400 dark:text-gray-500">{batch.id}</span>
-              <span className="text-2xs text-gray-300 dark:text-gray-600">·</span>
-              <span className="text-2xs text-gray-400 dark:text-gray-500">Cutoff {fmtCutoff(batch.cutoffTime)}</span>
+            <div className="flex items-center gap-1.5 mt-0.5 text-2xs text-gray-400 dark:text-gray-500">
+              {batch.origin && (
+                <>
+                  <span className="inline-flex items-center gap-0.5">
+                    {batch.origin === 'created' ? (
+                      <ArrowUpRight aria-hidden="true" className="w-2.5 h-2.5" strokeWidth={2} />
+                    ) : (
+                      <ArrowDownLeft aria-hidden="true" className="w-2.5 h-2.5" strokeWidth={2} />
+                    )}
+                    {batch.origin === 'created' ? 'Sent' : 'Received'}
+                  </span>
+                  <span className="text-gray-300 dark:text-gray-600">·</span>
+                </>
+              )}
+              <span>{batch.id}</span>
+              <span className="text-gray-300 dark:text-gray-600">·</span>
+              <span>Cutoff {fmtCutoff(batch.cutoffTime)}</span>
             </div>
           </div>
 
           {/* Primary CTA + secondary actions + status pills */}
           <div className="flex items-center gap-2 flex-shrink-0">
-            {/* Awaiting pill — sender, Pending */}
-            {batch.status === 'Pending' && batch.origin === 'created' && (
+            {/* Demo: simulate counterparty proposing an edit (only when we're awaiting them) */}
+            {isDemo && batch.status === 'Pending' && !myTurn && !inAmendMode && (
+              <button
+                onClick={simulateCounterpartyEdit}
+                title="Demo: simulate the counterparty proposing changes and bouncing back to you"
+                className="h-8 flex items-center gap-1 px-3 rounded-full text-xs font-medium text-amber-700 dark:text-amber-300 border border-amber-300 dark:border-amber-700 bg-amber-50/60 dark:bg-amber-900/10 hover:bg-amber-100 dark:hover:bg-amber-900/20 transition-colors duration-150 whitespace-nowrap"
+              >
+                <RefreshCw aria-hidden="true" className="w-3 h-3" strokeWidth={2} />
+                Simulate counterparty edit
+              </button>
+            )}
+            {/* Awaiting pill — when other party has the ball */}
+            {batch.status === 'Pending' && !myTurn && !inAmendMode && (
               <span className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800">
                 <span className="w-1.5 h-1.5 rounded-full bg-amber-500 dark:bg-amber-400 animate-pulse flex-shrink-0" />
-                Awaiting counterparty review
+                {hasAmendment ? 'Awaiting their review of your changes' : 'Awaiting counterparty review'}
               </span>
             )}
-            {/* Reject — recipient, Pending */}
-            {batch.status === 'Pending' && batch.origin === 'requested' && (
+            {/* Reject — when it's our turn on a Pending batch */}
+            {batch.status === 'Pending' && myTurn && !inAmendMode && (
               confirmingReject ? (
                 <div className="flex items-center gap-1.5">
                   <span className="text-xs text-red-600 dark:text-red-400 font-medium whitespace-nowrap">Reject batch?</span>
                   <button
-                    onClick={() => { onUpdate({ ...batch, status: 'Rejected' }); setConfirmingReject(false); }}
+                    onClick={() => { onUpdate(transitionStatus({ ...batch, awaiting: undefined, amendmentBaseline: undefined }, 'Rejected', 'Rejected batch')); setConfirmingReject(false); }}
                     className="h-8 flex items-center px-3 rounded-full text-xs font-semibold bg-red-500 text-white hover:bg-red-600 transition-colors duration-150 active:scale-[0.97] whitespace-nowrap"
                   >
                     Confirm
@@ -1171,8 +1382,18 @@ function BatchDetail({ batch, onUpdate, onDelete }: BatchDetailProps) {
                 </button>
               )
             )}
-            {/* Primary CTA (Send to Counterparty / Approve) */}
-            {primaryCta && (
+            {/* Propose changes / Counter — when it's our turn on a Pending batch and we're not already amending */}
+            {batch.status === 'Pending' && myTurn && !inAmendMode && (
+              <button
+                onClick={enterAmendMode}
+                className="h-8 flex items-center gap-1 px-3 rounded-full text-xs font-semibold text-[var(--color-700)] dark:text-[var(--color-300)] border border-[var(--color-300)] dark:border-[var(--color-700)] hover:bg-[var(--color-50)] dark:hover:bg-[var(--color-50)] transition-colors duration-150 active:scale-[0.97] whitespace-nowrap"
+              >
+                <Pencil aria-hidden="true" className="w-3 h-3" strokeWidth={2} />
+                {hasAmendment ? 'Counter' : 'Propose changes'}
+              </button>
+            )}
+            {/* Primary CTA (Send to Counterparty / Approve / Accept changes) */}
+            {primaryCta && !inAmendMode && (
               <button
                 onClick={primaryCta.action}
                 className={`h-8 flex items-center px-4 rounded-full text-xs font-semibold transition-[background-color,transform,box-shadow] duration-150 active:scale-[0.97] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--color-700)] whitespace-nowrap ${
@@ -1184,19 +1405,19 @@ function BatchDetail({ batch, onUpdate, onDelete }: BatchDetailProps) {
                 {primaryCta.label}
               </button>
             )}
-            {/* Revoke — sender, Pending */}
-            {batch.status === 'Pending' && batch.origin === 'created' && (
+            {/* Revoke — sender, Pending, awaiting them, no outstanding amendment */}
+            {batch.status === 'Pending' && batch.origin === 'created' && !myTurn && !hasAmendment && !inAmendMode && (
               <button
-                onClick={() => onUpdate({ ...batch, status: 'Revoked' })}
+                onClick={() => onUpdate(transitionStatus({ ...batch, awaiting: undefined }, 'Revoked', 'Revoked batch'))}
                 className="h-8 flex items-center px-3 rounded-full text-xs font-semibold text-orange-600 dark:text-orange-400 border border-orange-200 dark:border-orange-800 hover:bg-orange-50 dark:hover:bg-orange-900/20 transition-colors duration-150 active:scale-[0.97] whitespace-nowrap"
               >
                 Revoke
               </button>
             )}
             {/* Cancel — either role, Approved */}
-            {batch.status === 'Approved' && (
+            {batch.status === 'Approved' && !inAmendMode && (
               <button
-                onClick={() => onUpdate({ ...batch, status: 'Cancelled' })}
+                onClick={() => onUpdate(transitionStatus(batch, 'Cancelled', 'Cancelled batch'))}
                 className="h-8 flex items-center px-3 rounded-full text-xs font-semibold text-gray-500 dark:text-gray-400 border border-gray-200 dark:border-[var(--border)] hover:bg-gray-100 dark:hover:bg-[var(--surface-3)] transition-colors duration-150 active:scale-[0.97] whitespace-nowrap"
               >
                 Cancel
@@ -1353,6 +1574,12 @@ function BatchDetail({ batch, onUpdate, onDelete }: BatchDetailProps) {
           // Variant B (default): single combined table with a Direction column.
           // Internal review only — do not surface as a user-facing toggle.
           const useSplit = typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('layout') === 'split';
+          // In amend mode (or for a Draft we still own), inputs are editable.
+          // Otherwise rows render read-only (matches the new amend-via-CTA flow).
+          const isEditable = inAmendMode || (batch.status === 'Draft' && batch.origin === 'created');
+          // Show diff captions only when the awaiting party is reviewing —
+          // never while they're editing their own counter.
+          const baseline = hasAmendment && myTurn && !inAmendMode ? batch.amendmentBaseline : undefined;
           if (useSplit) {
             return (
               <div className="space-y-3">
@@ -1367,6 +1594,8 @@ function BatchDetail({ batch, onUpdate, onDelete }: BatchDetailProps) {
                   onSettleWithLynq={handleSettleWithLynq}
                   onAddObligation={(ob) => onAdd(ob, 'deliver')}
                   onRemoveObligation={onRemove}
+                  isEditable={isEditable}
+                  baseline={baseline ? { deliverObligations: baseline.deliverObligations, receiveObligations: [] } : undefined}
                 />
                 <CombinedObligationTable
                   deliverObligations={[]}
@@ -1379,6 +1608,8 @@ function BatchDetail({ batch, onUpdate, onDelete }: BatchDetailProps) {
                   onSettleWithLynq={handleSettleWithLynq}
                   onAddObligation={(ob) => onAdd(ob, 'receive')}
                   onRemoveObligation={onRemove}
+                  isEditable={isEditable}
+                  baseline={baseline ? { deliverObligations: [], receiveObligations: baseline.receiveObligations } : undefined}
                 />
               </div>
             );
@@ -1395,6 +1626,8 @@ function BatchDetail({ batch, onUpdate, onDelete }: BatchDetailProps) {
               onSettleWithLynq={handleSettleWithLynq}
               onAddObligation={onAdd}
               onRemoveObligation={onRemove}
+              isEditable={isEditable}
+              baseline={baseline}
             />
           );
         })()}
@@ -1470,6 +1703,25 @@ function BatchDetail({ batch, onUpdate, onDelete }: BatchDetailProps) {
           onClose={() => setSettlementTarget(null)}
           onConfirm={() => setSettlementTarget(null)}
         />
+      )}
+      </div>
+      {/* Amend-mode sticky footer — Cancel / Send proposal */}
+      {inAmendMode && (
+        <div className="flex-shrink-0 border-t border-gray-200 dark:border-[var(--border)] bg-white dark:bg-[var(--color-2)] px-5 py-3 flex items-center justify-end gap-2 shadow-[0_-2px_8px_rgba(0,0,0,0.04)] dark:shadow-[0_-2px_8px_rgba(0,0,0,0.4)]">
+          <span className="text-2xs text-gray-500 dark:text-gray-400 mr-auto">Edits will be sent back to {batch.counterpartyName} for review.</span>
+          <button
+            onClick={cancelAmendment}
+            className="text-xs text-gray-600 dark:text-gray-300 px-4 py-2 rounded-full border border-gray-200 dark:border-[var(--border)] hover:bg-gray-100 dark:hover:bg-[var(--surface-3)] transition-colors"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={submitAmendment}
+            className="text-xs font-semibold bg-[#CDF698] hover:bg-[var(--color-200)] text-gray-900 px-4 py-2 rounded-full transition-colors active:scale-[0.97]"
+          >
+            Send proposal
+          </button>
+        </div>
       )}
     </div>
   );
@@ -1691,7 +1943,132 @@ function buildBatch(parsed: ParsedBatch): Batch {
   // Default cutoff: tomorrow at 11:00 UTC, formatted as `YYYY-MM-DD HH:MM` to match fmtCutoff().
   const tomorrow = new Date(Date.now() + 24 * 60 * 60 * 1000);
   const cutoffTime = `${tomorrow.toISOString().slice(0, 10)} 11:00`;
-  return { id, counterpartyName: parsed.counterpartyName, cutoffTime, status: 'Draft', totalUsd, deliverObligations, receiveObligations };
+  return {
+    id,
+    counterpartyName: parsed.counterpartyName,
+    cutoffTime,
+    status: 'Draft',
+    totalUsd,
+    origin: 'created',
+    deliverObligations,
+    receiveObligations,
+    activity: [{
+      id: `${id}-created`,
+      timestamp: new Date().toISOString(),
+      type: 'created',
+      description: 'Batch imported from file',
+      user: 'You',
+    }],
+  };
+}
+
+// ── Counterparty single-select dropdown (search + scrollable list) ─────────
+
+interface CounterpartySelectProps {
+  value: string;
+  options: string[];
+  onChange: (name: string) => void;
+  placeholder?: string;
+  /** Optional CTA class override for the trigger button (size/state). */
+  triggerClassName?: string;
+}
+
+function CounterpartySelect({ value, options, onChange, placeholder = 'Pick a counterparty…', triggerClassName }: CounterpartySelectProps) {
+  const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState('');
+  const containerRef = useRef<HTMLDivElement>(null);
+  const searchRef = useRef<HTMLInputElement>(null);
+  const isNewName = value.length > 0 && !options.includes(value);
+
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: MouseEvent) => {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [open]);
+
+  useEffect(() => {
+    if (open) {
+      setSearch('');
+      setTimeout(() => searchRef.current?.focus(), 0);
+    }
+  }, [open]);
+
+  const filtered = options.filter((cp) => cp.toLowerCase().includes(search.toLowerCase()));
+
+  return (
+    <div ref={containerRef} className="relative flex-1 max-w-md">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className={triggerClassName ?? `w-full flex items-center justify-between gap-2 text-sm px-3 py-2 rounded-lg border border-gray-300 dark:border-[var(--border)] bg-white dark:bg-[var(--surface-3)] text-gray-900 dark:text-gray-100 hover:bg-gray-50 dark:hover:bg-[var(--surface-2)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-700)]`}
+      >
+        <span className="flex items-center gap-2 min-w-0">
+          {value ? (
+            <>
+              <CounterpartyAvatar name={value} size={20} />
+              <span className="font-semibold truncate">{value}</span>
+              {isNewName && (
+                <span className="text-2xs font-medium text-amber-700 dark:text-amber-400 ml-1 flex-shrink-0">new</span>
+              )}
+            </>
+          ) : (
+            <>
+              <Users aria-hidden="true" className="w-3.5 h-3.5 flex-shrink-0" strokeWidth={2} />
+              <span className="text-gray-500 dark:text-gray-400">{placeholder}</span>
+            </>
+          )}
+        </span>
+        <ChevronDown
+          aria-hidden="true"
+          className={`w-3.5 h-3.5 flex-shrink-0 transition-transform duration-150 ${open ? 'rotate-180' : ''}`}
+          strokeWidth={2}
+        />
+      </button>
+      {open && (
+        <div className="absolute left-0 right-0 top-full mt-1 bg-white dark:bg-[var(--color-2)] border border-gray-200 dark:border-[var(--border)] rounded-xl shadow-xl overflow-hidden z-20 dropdown-enter">
+          <div className="p-2">
+            <input
+              ref={searchRef}
+              type="text"
+              placeholder="Search counterparty…"
+              aria-label="Search counterparty"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="w-full text-xs bg-gray-50 dark:bg-[var(--surface-3)] border border-gray-200 dark:border-[var(--border)] rounded-md px-2 py-1.5 text-gray-700 dark:text-gray-200 focus:outline-none focus:ring-1 focus:ring-[var(--color-700)]"
+            />
+          </div>
+          <div className="max-h-56 overflow-y-auto pb-1">
+            {filtered.length === 0 ? (
+              <p className="px-3 py-3 text-xs text-gray-400 dark:text-gray-500 text-center">No matches</p>
+            ) : (
+              filtered.map((name) => {
+                const isSelected = value === name;
+                return (
+                  <button
+                    key={name}
+                    type="button"
+                    onClick={() => { onChange(name); setOpen(false); }}
+                    className={`w-full flex items-center gap-2 px-3 py-1.5 text-xs hover-item transition-colors text-left ${
+                      isSelected ? 'bg-[var(--color-50)] dark:bg-[var(--color-950)]/30' : ''
+                    }`}
+                  >
+                    <CounterpartyAvatar name={name} size={18} />
+                    <span className={`truncate flex-1 ${isSelected ? 'font-semibold text-gray-900 dark:text-gray-100' : 'text-gray-700 dark:text-gray-200'}`}>{name}</span>
+                    {isSelected && (
+                      <Check aria-hidden="true" className="w-3 h-3 text-[var(--color-700)] dark:text-[var(--color-300)] flex-shrink-0" strokeWidth={2.5} />
+                    )}
+                  </button>
+                );
+              })
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
 }
 
 // ── ImportModal ────────────────────────────────────────────────────────────────
@@ -1790,10 +2167,27 @@ function ImportModal({ onConfirm, onClose, existingCounterparties }: ImportModal
     if (step === 'review') setStep('upload');
   };
 
-  const finalize = () => {
+  const finalize = (mode: SubmitMode = submitMode) => {
     if (!parseResult) return;
-    const status: BatchStatus = submitMode === 'direct' ? 'Pending' : 'Draft';
-    const batches = parseResult.batches.map(b => ({ ...buildBatch(b), status }));
+    const isDirect = mode === 'direct';
+    const batches = parseResult.batches.map((b) => {
+      const base = buildBatch(b);
+      if (!isDirect) return base;
+      // Sent directly: mark as Pending awaiting recipient + log the "Sent" event.
+      const sentEvent: ActivityEntry = {
+        id: `${base.id}-sent`,
+        timestamp: new Date().toISOString(),
+        type: 'status_change',
+        description: 'Sent to counterparty',
+        user: 'You',
+      };
+      return {
+        ...base,
+        status: 'Pending' as BatchStatus,
+        awaiting: 'recipient' as const,
+        activity: [sentEvent, ...(base.activity ?? [])],
+      };
+    });
     setImportedBatches(batches);
     setStep('complete');
   };
@@ -1930,7 +2324,7 @@ function ImportModal({ onConfirm, onClose, existingCounterparties }: ImportModal
 
               <input ref={fileRef} type="file" accept=".csv,.txt" className="sr-only" aria-label="Upload CSV or text file" onChange={handleFileChange} />
               {fileName ? (
-                <div className="flex items-center justify-between gap-3 px-5 py-4 bg-[var(--positive)]/10 border border-[var(--positive)]/30 rounded-xl">
+                <div className="flex items-center justify-between gap-3 px-5 py-4 bg-[var(--positive)]/10 border border-[var(--positive)] rounded-xl">
                   <div className="flex items-center gap-3">
                     <CheckCircle aria-hidden="true" className="w-5 h-5 text-[var(--positive)] flex-shrink-0" strokeWidth={2} />
                     <div>
@@ -1989,7 +2383,7 @@ function ImportModal({ onConfirm, onClose, existingCounterparties }: ImportModal
               )}
 
               {parseError && (
-                <div className="flex items-start gap-2 px-3 py-2.5 bg-[var(--negative)]/10 border border-[var(--negative)]/30 rounded-lg">
+                <div className="flex items-start gap-2 px-3 py-2.5 bg-[var(--negative)]/10 border border-[var(--negative)] rounded-lg">
                   <AlertCircle aria-hidden="true" className="w-4 h-4 text-[var(--negative)] flex-shrink-0 mt-0.5" strokeWidth={2} />
                   <p className="text-xs text-[var(--negative)]">{parseError}</p>
                 </div>
@@ -2107,27 +2501,18 @@ function ImportModal({ onConfirm, onClose, existingCounterparties }: ImportModal
                     <div className="flex-1 min-w-0">
                       <p className="text-2xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-1.5">Counterparty</p>
                       <div className="flex items-center gap-3">
-                        <select
-                          value={existingCounterparties.includes(selectedBatch.counterpartyName) ? selectedBatch.counterpartyName : '__custom__'}
-                          onChange={(e) => {
-                            const v = e.target.value;
-                            if (v === '__custom__') return;
+                        <CounterpartySelect
+                          value={selectedBatch.counterpartyResolved ? selectedBatch.counterpartyName : ''}
+                          options={existingCounterparties}
+                          placeholder="— Pick a counterparty —"
+                          onChange={(v) => {
                             updateBatch(selectedBatchIdx, {
                               counterpartyName: v,
                               counterpartyResolved: true,
                               issues: (selectedBatch.issues ?? []).filter((x) => x !== 'unknown_counterparty'),
                             });
                           }}
-                          className="flex-1 max-w-md text-sm font-semibold px-3 py-2 border border-gray-300 dark:border-[var(--border)] rounded-lg bg-white dark:bg-[var(--surface-3)] text-gray-900 dark:text-gray-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-700)]"
-                        >
-                          {!selectedBatch.counterpartyResolved && <option value="__custom__">— Pick a counterparty —</option>}
-                          {existingCounterparties.map((cp) => (
-                            <option key={cp} value={cp}>{cp}</option>
-                          ))}
-                          {selectedBatch.counterpartyResolved && !existingCounterparties.includes(selectedBatch.counterpartyName) && (
-                            <option value={selectedBatch.counterpartyName}>{selectedBatch.counterpartyName} (new)</option>
-                          )}
-                        </select>
+                        />
                         {!selectedBatch.counterpartyResolved && (
                           <span className="inline-flex items-center gap-1 text-xs text-amber-700 dark:text-amber-400 flex-shrink-0">
                             <AlertCircle aria-hidden="true" className="w-3.5 h-3.5" strokeWidth={2} />
@@ -2157,11 +2542,11 @@ function ImportModal({ onConfirm, onClose, existingCounterparties }: ImportModal
                     <thead className="sticky top-0 z-10">
                       <tr className="text-gray-500 dark:text-gray-400 uppercase tracking-wide text-[10px] bg-gray-50 dark:bg-[var(--color-1)] border-b border-gray-200 dark:border-[var(--border)]">
                         <th className="text-left pl-6 pr-2 py-2 font-medium w-10">#</th>
-                        <th className="text-left px-2 py-2 font-medium w-44">Direction</th>
-                        <th className="text-left px-2 py-2 font-medium w-28">Asset</th>
-                        <th className="text-right px-2 py-2 font-medium">Amount</th>
-                        <th className="text-right px-2 py-2 font-medium w-32">USD value</th>
-                        <th className="text-left pr-6 pl-3 py-2 font-medium">Notes</th>
+                        <th className="text-left px-2 py-2 font-medium w-36">Direction</th>
+                        <th className="text-left px-2 py-2 font-medium w-24">Asset</th>
+                        <th className="text-right px-2 py-2 font-medium min-w-[12rem]">Amount</th>
+                        <th className="text-right px-2 py-2 font-medium min-w-[10rem]">USD value</th>
+                        <th className="text-left pr-6 pl-3 py-2 font-medium w-48">Notes</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -2193,7 +2578,7 @@ function ImportModal({ onConfirm, onClose, existingCounterparties }: ImportModal
                                       ob.direction === d
                                         ? d === 'deliver'
                                           ? 'bg-red-50 dark:bg-red-900/20 text-red-500 dark:text-red-400'
-                                          : 'bg-[var(--positive)]/10 text-[var(--positive)]'
+                                          : 'bg-green-50 dark:bg-green-900/20 text-[var(--positive)]'
                                         : 'text-gray-400 dark:text-gray-500 hover:text-gray-600'
                                     }`}
                                   >
@@ -2231,16 +2616,35 @@ function ImportModal({ onConfirm, onClose, existingCounterparties }: ImportModal
                                     issues: (v > 0 && newIssues.length === 0) ? undefined : (v > 0 ? newIssues : ob.issues),
                                   });
                                 }}
-                                className={`w-32 text-right text-xs font-medium bg-transparent border rounded px-2 py-1 text-gray-800 dark:text-gray-100 tabular-nums focus:outline-none ${
+                                className={`w-full text-right text-xs font-medium bg-transparent border rounded px-2 py-1 text-gray-800 dark:text-gray-100 tabular-nums focus:outline-none ${
                                   missingAmt
-                                    ? 'border-amber-400 dark:border-amber-700 focus:border-amber-500'
-                                    : 'border-transparent hover:border-gray-200 dark:hover:border-[var(--border)] focus:border-[var(--color-700)]'
+                                    ? 'border-amber-400 dark:border-amber-700 focus:border-amber-500 dark:focus:border-amber-500'
+                                    : 'border-transparent hover:border-gray-200 dark:hover:border-[var(--border)] focus:border-[var(--color-700)] dark:focus:border-[var(--color-700)]'
                                 }`}
                                 aria-label="Amount"
                               />
                             </td>
-                            <td className="px-2 py-2 text-right tabular-nums text-gray-500 dark:text-gray-400">
-                              {ob.amountUsd > 0 ? fmtUsdCompact(ob.amountUsd) : <span className="text-gray-300 dark:text-gray-600">—</span>}
+                            <td className="px-2 py-2 text-right">
+                              <input
+                                type="text"
+                                inputMode="decimal"
+                                placeholder="0"
+                                value={ob.amountUsd > 0 ? ob.amountUsd.toLocaleString(undefined, { maximumFractionDigits: 2 }) : ''}
+                                onChange={(e) => {
+                                  const cleaned = stripCommas(formatNumInput(e.target.value, 2));
+                                  const usd = parseFloat(cleaned) || 0;
+                                  const price = ASSET_USD[ob.asset] ?? 1;
+                                  const asset = price > 0 ? usd / price : 0;
+                                  const newIssues = (ob.issues ?? []).filter((x) => x !== 'missing_amount');
+                                  updateObligation(selectedBatchIdx, j, {
+                                    amountUsd: usd,
+                                    amountAsset: asset,
+                                    issues: (usd > 0 && newIssues.length === 0) ? undefined : (usd > 0 ? newIssues : ob.issues),
+                                  });
+                                }}
+                                className="w-full text-right text-xs bg-transparent border border-transparent hover:border-gray-200 dark:hover:border-[var(--border)] focus:border-[var(--color-700)] dark:focus:border-[var(--color-700)] rounded px-2 py-1 text-gray-500 dark:text-gray-400 tabular-nums focus:outline-none"
+                                aria-label="USD value"
+                              />
                             </td>
                             <td className="pr-6 pl-3 py-2 text-2xs">
                               {ambiguousDir && (
@@ -2318,7 +2722,7 @@ function ImportModal({ onConfirm, onClose, existingCounterparties }: ImportModal
         {step === 'review' ? (
           <>
             <button
-              onClick={() => { if (canGoNext) { setSubmitMode('draft'); finalize(); } }}
+              onClick={() => { if (canGoNext) { setSubmitMode('draft'); finalize('draft'); } }}
               disabled={!canGoNext}
               className={`flex items-center gap-1.5 px-4 py-1.5 text-xs font-medium rounded-full transition-colors border ${
                 canGoNext
@@ -2329,7 +2733,7 @@ function ImportModal({ onConfirm, onClose, existingCounterparties }: ImportModal
               Import as draft{n !== 1 ? 's' : ''}
             </button>
             <button
-              onClick={() => { if (canGoNext) { setSubmitMode('direct'); finalize(); } }}
+              onClick={() => { if (canGoNext) { setSubmitMode('direct'); finalize('direct'); } }}
               disabled={!canGoNext}
               className={`flex items-center gap-1.5 px-4 py-1.5 text-xs font-medium rounded-full transition-colors text-gray-900 bg-[#CDF698] ${canGoNext ? 'hover:bg-[var(--color-200)]' : 'opacity-30 cursor-not-allowed'}`}
             >
@@ -2663,15 +3067,216 @@ function BatchesLanding({ filteredBatches, onSelectBatch }: BatchesLandingProps)
 
 const FILTER_KEY = 'cycles-prime:batch-filters';
 
-function loadSavedFilters(): { datePreset: string; statusFilter: string[]; cpFilter: string[] } | null {
+interface SavedFilters {
+  datePreset: string;
+  statusFilter: string[];
+  cpFilter: string[];
+  needsMyAction?: boolean;
+}
+
+function loadSavedFilters(): SavedFilters | null {
   try {
     const raw = localStorage.getItem(FILTER_KEY);
     return raw ? JSON.parse(raw) : null;
   } catch { return null; }
 }
 
-function saveSavedFilters(data: { datePreset: string; statusFilter: string[]; cpFilter: string[] }) {
+function saveSavedFilters(data: SavedFilters) {
   try { localStorage.setItem(FILTER_KEY, JSON.stringify(data)); } catch {}
+}
+
+// ── New-batch modal ─────────────────────────────────────────────────────────
+
+interface NewBatchModalProps {
+  open: boolean;
+  onClose: () => void;
+  onCreate: (counterpartyName: string, cutoffLocal: string) => void;
+  allCounterparties: string[];
+  defaultCutoff: string;
+}
+
+function NewBatchModal({ open, onClose, onCreate, allCounterparties, defaultCutoff }: NewBatchModalProps) {
+  const [cp, setCp] = useState('');
+  const [cutoff, setCutoff] = useState(defaultCutoff);
+  const [cpSearch, setCpSearch] = useState('');
+  const [cpDropdownOpen, setCpDropdownOpen] = useState(false);
+  const cpRef = useRef<HTMLDivElement>(null);
+  const searchRef = useRef<HTMLInputElement>(null);
+
+  // Reset state every time the modal opens.
+  useEffect(() => {
+    if (open) {
+      setCp('');
+      setCutoff(defaultCutoff);
+      setCpSearch('');
+      setCpDropdownOpen(true);
+      // Focus the search field after the modal mounts.
+      setTimeout(() => searchRef.current?.focus(), 0);
+    }
+  }, [open, defaultCutoff]);
+
+  // Esc to close.
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: globalThis.KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [open, onClose]);
+
+  // Click-outside to close the counterparty dropdown.
+  useEffect(() => {
+    if (!cpDropdownOpen) return;
+    const handler = (e: MouseEvent) => {
+      if (cpRef.current && !cpRef.current.contains(e.target as Node)) {
+        setCpDropdownOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [cpDropdownOpen]);
+
+  if (!open) return null;
+
+  const canCreate = cp.trim().length > 0 && cutoff.length > 0;
+  const filteredCps = allCounterparties.filter((name) =>
+    name.toLowerCase().includes(cpSearch.toLowerCase())
+  );
+
+  return createPortal(
+    <div className="modal-overlay" onClick={(e) => e.target === e.currentTarget && onClose()}>
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="new-batch-modal-title"
+        className="card-enter bg-white dark:bg-[var(--color-2)] rounded-xl shadow-2xl w-full max-w-md mx-4 border border-gray-200 dark:border-[var(--border)] flex flex-col"
+      >
+        {/* Header */}
+        <div className="px-5 py-3.5 border-b border-gray-100 dark:border-[var(--border)] flex items-center justify-between">
+          <div>
+            <h2 id="new-batch-modal-title" className="text-sm font-semibold text-gray-900 dark:text-gray-100">New batch</h2>
+            <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-0.5">Pick a counterparty and the cutoff. You'll add obligations next.</p>
+          </div>
+          <button
+            onClick={onClose}
+            aria-label="Close"
+            className="text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 transition-colors flex-shrink-0"
+          >
+            <X aria-hidden="true" className="w-4 h-4" strokeWidth={2} />
+          </button>
+        </div>
+
+        {/* Body */}
+        <div className="p-5 space-y-4">
+          {/* Counterparty */}
+          <div ref={cpRef}>
+            <label className="block text-[10px] uppercase tracking-wide text-gray-500 dark:text-gray-400 font-medium mb-1.5">Counterparty</label>
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => setCpDropdownOpen((v) => !v)}
+                className={`w-full flex items-center justify-between gap-2 text-xs px-3 py-2 rounded-lg border transition-colors ${
+                  cp
+                    ? 'bg-white dark:bg-[var(--color-2)] border-gray-300 dark:border-[var(--border)] text-gray-800 dark:text-gray-100'
+                    : 'bg-gray-50 dark:bg-[var(--surface-3)] border-gray-200 dark:border-[var(--border)] text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-[var(--surface-2)]'
+                }`}
+              >
+                <span className="flex items-center gap-2 min-w-0">
+                  {cp ? (
+                    <>
+                      <CounterpartyAvatar name={cp} size={20} />
+                      <span className="font-medium truncate">{cp}</span>
+                    </>
+                  ) : (
+                    <>
+                      <Users aria-hidden="true" className="w-3.5 h-3.5 flex-shrink-0" strokeWidth={2} />
+                      <span>Select counterparty…</span>
+                    </>
+                  )}
+                </span>
+                <ChevronDown
+                  aria-hidden="true"
+                  className={`w-3.5 h-3.5 flex-shrink-0 transition-transform duration-150 ${cpDropdownOpen ? 'rotate-180' : ''}`}
+                  strokeWidth={2}
+                />
+              </button>
+              {cpDropdownOpen && (
+                <div className="absolute left-0 right-0 top-full mt-1 bg-white dark:bg-[var(--color-2)] border border-gray-200 dark:border-[var(--border)] rounded-xl shadow-xl overflow-hidden z-10 dropdown-enter">
+                  <div className="p-2">
+                    <input
+                      ref={searchRef}
+                      type="text"
+                      placeholder="Search counterparty…"
+                      aria-label="Search counterparty"
+                      value={cpSearch}
+                      onChange={(e) => setCpSearch(e.target.value)}
+                      className="w-full text-xs bg-gray-50 dark:bg-[var(--surface-3)] border border-gray-200 dark:border-[var(--border)] rounded-md px-2 py-1.5 text-gray-700 dark:text-gray-200 focus:outline-none focus:ring-1 focus:ring-[var(--color-700)]"
+                    />
+                  </div>
+                  <div className="max-h-56 overflow-y-auto pb-1">
+                    {filteredCps.length === 0 ? (
+                      <p className="px-3 py-3 text-xs text-gray-400 dark:text-gray-500 text-center">No matches</p>
+                    ) : (
+                      filteredCps.map((name) => {
+                        const isSelected = cp === name;
+                        return (
+                          <button
+                            key={name}
+                            type="button"
+                            onClick={() => { setCp(name); setCpSearch(''); setCpDropdownOpen(false); }}
+                            className={`w-full flex items-center gap-2 px-3 py-1.5 text-xs hover-item transition-colors text-left ${
+                              isSelected ? 'bg-[var(--color-50)] dark:bg-[var(--color-950)]/30' : ''
+                            }`}
+                          >
+                            <CounterpartyAvatar name={name} size={18} />
+                            <span className={`truncate flex-1 ${isSelected ? 'font-semibold text-gray-900 dark:text-gray-100' : 'text-gray-700 dark:text-gray-200'}`}>{name}</span>
+                            {isSelected && (
+                              <Check aria-hidden="true" className="w-3 h-3 text-[var(--color-700)] dark:text-[var(--color-300)] flex-shrink-0" strokeWidth={2.5} />
+                            )}
+                          </button>
+                        );
+                      })
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Cutoff */}
+          <div>
+            <label className="block text-[10px] uppercase tracking-wide text-gray-500 dark:text-gray-400 font-medium mb-1.5">Cutoff time</label>
+            <input
+              type="datetime-local"
+              value={cutoff}
+              onChange={(e) => setCutoff(e.target.value)}
+              className="w-full text-xs bg-gray-50 dark:bg-[var(--surface-3)] border border-gray-200 dark:border-[var(--border)] rounded-md px-3 py-2 text-gray-700 dark:text-gray-200 focus:outline-none focus:ring-1 focus:ring-[var(--color-700)]"
+            />
+            <p className="mt-1.5 text-[11px] text-gray-400 dark:text-gray-500">Defaults to the next scheduled cycle.</p>
+          </div>
+        </div>
+
+        {/* Footer */}
+        <div className="px-5 py-3.5 border-t border-gray-100 dark:border-[var(--border)] flex items-center justify-end gap-2 bg-gray-50/40 dark:bg-[var(--color-1)]/40 rounded-b-xl">
+          <button
+            type="button"
+            onClick={onClose}
+            className="text-xs text-gray-600 dark:text-gray-300 px-4 py-2 rounded-full border border-gray-200 dark:border-[var(--border)] hover:bg-gray-100 dark:hover:bg-[var(--surface-3)] transition-colors"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={() => canCreate && onCreate(cp.trim(), cutoff)}
+            disabled={!canCreate}
+            className="text-xs font-semibold bg-[#CDF698] hover:bg-[var(--color-200)] text-gray-900 px-4 py-2 rounded-full transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            Create batch
+          </button>
+        </div>
+      </div>
+    </div>,
+    document.body,
+  );
 }
 
 interface BatchesViewProps {
@@ -2679,13 +3284,16 @@ interface BatchesViewProps {
   onBatchesChange: (batches: Batch[]) => void;
   initialBatchId?: string;
   initialCpFilter?: string;
+  isDemo?: boolean;
 }
 
-export default function BatchesView({ batches, onBatchesChange, initialBatchId, initialCpFilter }: BatchesViewProps) {
+export default function BatchesView({ batches, onBatchesChange, initialBatchId, initialCpFilter, isDemo }: BatchesViewProps) {
   const [selectedId, setSelectedId] = useState<string>(initialBatchId ?? '');
   const [focusedIndex, setFocusedIndex] = useState<number>(0);
   const [batchesMode, setBatchesMode] = useState<'dashboard' | 'detail'>(() => initialBatchId ? 'detail' : 'dashboard');
   // Resizable detail-view sidebar (Task 2)
+  const sidebarPanelRef = useRef<HTMLDivElement>(null);
+  const [sidebarPxWidth, setSidebarPxWidth] = useState<number>(0);
   const [sidebarWidth, setSidebarWidth] = useState<number>(() => {
     const saved = parseFloat(localStorage.getItem('cycles-prime:detail-sidebar-pct') ?? '');
     return Number.isFinite(saved) && saved >= 22 && saved <= 55 ? saved : 30;
@@ -2719,14 +3327,23 @@ export default function BatchesView({ batches, onBatchesChange, initialBatchId, 
   useEffect(() => {
     try { localStorage.setItem('cycles-prime:detail-sidebar-pct', String(sidebarWidth)); } catch {}
   }, [sidebarWidth]);
+  // Track the actual pixel width of the detail sidebar so the embedded batch
+  // list can show progressively more columns as the user widens it. The panel
+  // only mounts in detail mode, so re-attach when the mode flips.
+  useEffect(() => {
+    const node = sidebarPanelRef.current;
+    if (!node) return;
+    setSidebarPxWidth(node.getBoundingClientRect().width);
+    const obs = new ResizeObserver((entries) => {
+      for (const entry of entries) setSidebarPxWidth(entry.contentRect.width);
+    });
+    obs.observe(node);
+    return () => obs.disconnect();
+  }, [batchesMode]);
   const [showImport, setShowImport] = useState(false);
   const [showAddMenu, setShowAddMenu]         = useState(false);
   const [showNewBatchForm, setShowNewBatchForm] = useState(false);
-  const [newBatchCP, setNewBatchCP]           = useState('');
-  const [newBatchCutoff, setNewBatchCutoff]   = useState('');
-  const [newBatchCPSearch, setNewBatchCPSearch] = useState('');
   const addMenuRef = useRef<HTMLDivElement>(null);
-  const newBatchFormRef = useRef<HTMLDivElement>(null);
   type DatePreset = 'all' | 'today' | '24h' | '3d' | '7d' | '30d' | '3m' | 'custom';
   const [datePreset, setDatePreset] = useState<DatePreset>(
     () => (loadSavedFilters()?.datePreset as DatePreset) ?? 'today'
@@ -2752,8 +3369,11 @@ export default function BatchesView({ batches, onBatchesChange, initialBatchId, 
   const [showCpFilter, setShowCpFilter] = useState(false);
   const [cpSearch, setCpSearch] = useState('');
   const cpFilterRef = useRef<HTMLDivElement>(null);
+  const [needsMyAction, setNeedsMyAction] = useState<boolean>(
+    () => loadSavedFilters()?.needsMyAction ?? false
+  );
   const [listSearch, setListSearch] = useState('');
-  type BatchSortCol = 'id' | 'counterparty' | 'status' | 'cutoff' | 'obligations' | 'deliver' | 'receive' | 'net';
+  type BatchSortCol = 'id' | 'counterparty' | 'status' | 'direction' | 'cutoff' | 'obligations' | 'deliver' | 'receive' | 'net';
   const [batchSortCol, setBatchSortCol] = useState<BatchSortCol>('cutoff');
   const [batchSortDir, setBatchSortDir] = useState<'asc' | 'desc'>('desc');
   // Infinite-scroll window for the dashboard table
@@ -2821,22 +3441,8 @@ export default function BatchesView({ batches, onBatchesChange, initialBatchId, 
   }, [showAddMenu]);
 
   useEffect(() => {
-    if (!showNewBatchForm) return;
-    const handler = (e: MouseEvent) => {
-      if (newBatchFormRef.current && !newBatchFormRef.current.contains(e.target as Node)) {
-        setShowNewBatchForm(false);
-        setNewBatchCP('');
-        setNewBatchCutoff('');
-        setNewBatchCPSearch('');
-      }
-    };
-    document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
-  }, [showNewBatchForm]);
-
-  useEffect(() => {
-    saveSavedFilters({ datePreset, statusFilter: Array.from(statusFilter), cpFilter: Array.from(cpFilter) });
-  }, [datePreset, statusFilter, cpFilter]);
+    saveSavedFilters({ datePreset, statusFilter: Array.from(statusFilter), cpFilter: Array.from(cpFilter), needsMyAction });
+  }, [datePreset, statusFilter, cpFilter, needsMyAction]);
 
   const allCounterparties = Array.from(new Set(batches.map(b => b.counterpartyName))).sort();
 
@@ -2847,6 +3453,12 @@ export default function BatchesView({ batches, onBatchesChange, initialBatchId, 
     // Status filter — empty = all
     if (statusFilter.size > 0) result = result.filter(b => statusFilter.has(b.status));
     if (cpFilter.size > 0) result = result.filter(b => cpFilter.has(b.counterpartyName));
+    if (needsMyAction) {
+      result = result.filter(b =>
+        (b.status === 'Draft' && b.origin === 'created' && (b.deliverObligations.length + b.receiveObligations.length) > 0) ||
+        (b.status === 'Pending' && b.origin === 'requested')
+      );
+    }
     // Date filter
     if (datePreset === 'today') {
       const today = new Date();
@@ -2876,12 +3488,34 @@ export default function BatchesView({ batches, onBatchesChange, initialBatchId, 
     return result;
   })();
 
-  const detailFilteredBatches = listSearch.trim()
-    ? filteredBatches.filter(b =>
-        b.counterpartyName.toLowerCase().includes(listSearch.toLowerCase()) ||
-        b.id.toLowerCase().includes(listSearch.toLowerCase())
-      )
-    : filteredBatches;
+  const sortBatchList = (list: Batch[]): Batch[] => [...list].sort((a, b) => {
+    const aD = a.deliverObligations.reduce((s, o) => s + o.amountUsd, 0);
+    const bD = b.deliverObligations.reduce((s, o) => s + o.amountUsd, 0);
+    const aR = a.receiveObligations.reduce((s, o) => s + o.amountUsd, 0);
+    const bR = b.receiveObligations.reduce((s, o) => s + o.amountUsd, 0);
+    let cmp = 0;
+    switch (batchSortCol) {
+      case 'id':           cmp = a.id.localeCompare(b.id); break;
+      case 'counterparty': cmp = a.counterpartyName.localeCompare(b.counterpartyName); break;
+      case 'status':       cmp = a.status.localeCompare(b.status); break;
+      case 'direction':    cmp = (a.origin ?? '').localeCompare(b.origin ?? ''); break;
+      case 'cutoff':       cmp = new Date(a.cutoffTime).getTime() - new Date(b.cutoffTime).getTime(); break;
+      case 'obligations':  cmp = (a.deliverObligations.length + a.receiveObligations.length) - (b.deliverObligations.length + b.receiveObligations.length); break;
+      case 'deliver':      cmp = aD - bD; break;
+      case 'receive':      cmp = aR - bR; break;
+      case 'net':          cmp = (aR - aD) - (bR - bD); break;
+    }
+    return batchSortDir === 'asc' ? cmp : -cmp;
+  });
+
+  const detailFilteredBatches = sortBatchList(
+    listSearch.trim()
+      ? filteredBatches.filter(b =>
+          b.counterpartyName.toLowerCase().includes(listSearch.toLowerCase()) ||
+          b.id.toLowerCase().includes(listSearch.toLowerCase())
+        )
+      : filteredBatches
+  );
 
   const sortedBatchTable = [...filteredBatches].sort((a, b) => {
     const aD = a.deliverObligations.reduce((s, o) => s + o.amountUsd, 0);
@@ -2893,6 +3527,7 @@ export default function BatchesView({ batches, onBatchesChange, initialBatchId, 
       case 'id':           cmp = a.id.localeCompare(b.id); break;
       case 'counterparty': cmp = a.counterpartyName.localeCompare(b.counterpartyName); break;
       case 'status':       cmp = a.status.localeCompare(b.status); break;
+      case 'direction':    cmp = (a.origin ?? '').localeCompare(b.origin ?? ''); break;
       case 'cutoff':       cmp = new Date(a.cutoffTime).getTime() - new Date(b.cutoffTime).getTime(); break;
       case 'obligations':  cmp = (a.deliverObligations.length + a.receiveObligations.length) - (b.deliverObligations.length + b.receiveObligations.length); break;
       case 'deliver':      cmp = aD - bD; break;
@@ -2950,13 +3585,13 @@ export default function BatchesView({ batches, onBatchesChange, initialBatchId, 
     setBatchesMode('detail');
   };
 
-  const createBlankBatch = () => {
-    if (!newBatchCP.trim()) return;
+  const createBlankBatch = (counterpartyName: string, cutoffLocal: string) => {
+    if (!counterpartyName.trim() || !cutoffLocal) return;
     const id = 'batch-' + Date.now().toString(36);
     const newBatch: Batch = {
       id,
-      counterpartyName: newBatchCP.trim(),
-      cutoffTime: newBatchCutoff || new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+      counterpartyName: counterpartyName.trim(),
+      cutoffTime: cutoffTimeFromDatetimeLocal(cutoffLocal),
       status: 'Draft',
       totalUsd: 0,
       origin: 'created',
@@ -2975,11 +3610,11 @@ export default function BatchesView({ batches, onBatchesChange, initialBatchId, 
     setFocusedIndex(0);
     setShowNewBatchForm(false);
     setShowAddMenu(false);
-    setNewBatchCP('');
-    setNewBatchCutoff('');
-    setNewBatchCPSearch('');
     setShowOverview(false);
     setBatchesMode('detail');
+    // Widen the date filter so the new batch is visible when the user
+    // navigates back to the list (its cutoff may be tomorrow, not "today").
+    setDatePreset('all');
   };
 
   // Next scheduled cycle countdown
@@ -3053,7 +3688,7 @@ export default function BatchesView({ batches, onBatchesChange, initialBatchId, 
   const isDateFiltered = datePreset !== 'all';
   const isStatusFiltered = statusFilter.size > 0 || showArchived;
   const isCpFiltered = cpFilter.size > 0;
-  const isAnyFiltered = isDateFiltered || isStatusFiltered || isCpFiltered;
+  const isAnyFiltered = isDateFiltered || isStatusFiltered || isCpFiltered || needsMyAction;
   const PRESETS_DASH: { label: string; value: DatePreset }[] = [
     { label: 'Today',    value: 'today' },
     { label: 'All time', value: 'all'   },
@@ -3127,62 +3762,6 @@ export default function BatchesView({ batches, onBatchesChange, initialBatchId, 
                       <Upload aria-hidden="true" className="w-3 h-3 text-gray-400" strokeWidth={2} />
                       Import CSV
                     </button>
-                  </div>
-                )}
-                {showNewBatchForm && (
-                  <div ref={newBatchFormRef} className="absolute right-0 top-full mt-1 bg-white dark:bg-[var(--color-2)] border border-gray-200 dark:border-[var(--border)] rounded-xl shadow-xl z-40 dropdown-enter w-64 p-3">
-                    <p className="text-[10px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-2.5">New batch</p>
-                    <div className="mb-2.5">
-                      <label className="text-[10px] text-gray-400 dark:text-gray-500 mb-1 block">Counterparty</label>
-                      <input
-                        type="text"
-                        placeholder="Search counterparty…"
-                        value={newBatchCP}
-                        onChange={e => { setNewBatchCP(e.target.value); setNewBatchCPSearch(e.target.value); }}
-                        className="w-full text-2xs bg-gray-50 dark:bg-[var(--surface-3)] border border-gray-200 dark:border-[var(--border)] rounded-md px-2 py-1.5 text-gray-700 dark:text-gray-200 focus:outline-none focus:ring-1 focus:ring-[var(--color-700)]"
-                        autoFocus
-                      />
-                      {newBatchCPSearch && (
-                        <div className="mt-1 border border-gray-100 dark:border-[var(--border)] rounded-lg overflow-hidden shadow-sm max-h-32 overflow-y-auto">
-                          {allCounterparties
-                            .filter(cp => cp.toLowerCase().includes(newBatchCPSearch.toLowerCase()))
-                            .slice(0, 6)
-                            .map(cp => (
-                              <button
-                                key={cp}
-                                onClick={() => { setNewBatchCP(cp); setNewBatchCPSearch(''); }}
-                                className="w-full text-left px-2.5 py-1.5 text-2xs hover-item text-gray-700 dark:text-gray-200 transition-colors"
-                              >
-                                {cp}
-                              </button>
-                            ))}
-                        </div>
-                      )}
-                    </div>
-                    <div className="mb-3">
-                      <label className="text-[10px] text-gray-400 dark:text-gray-500 mb-1 block">Cutoff time</label>
-                      <input
-                        type="datetime-local"
-                        value={newBatchCutoff}
-                        onChange={e => setNewBatchCutoff(e.target.value)}
-                        className="w-full text-2xs bg-gray-50 dark:bg-[var(--surface-3)] border border-gray-200 dark:border-[var(--border)] rounded-md px-2 py-1.5 text-gray-700 dark:text-gray-200 focus:outline-none focus:ring-1 focus:ring-[var(--color-700)]"
-                      />
-                    </div>
-                    <div className="flex gap-2">
-                      <button
-                        onClick={createBlankBatch}
-                        disabled={!newBatchCP.trim()}
-                        className="flex-1 text-2xs font-semibold bg-[#CDF698] hover:bg-[var(--color-200)] text-gray-900 px-3 py-1.5 rounded-full transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-                      >
-                        Create
-                      </button>
-                      <button
-                        onClick={() => { setShowNewBatchForm(false); setNewBatchCP(''); setNewBatchCutoff(''); setNewBatchCPSearch(''); }}
-                        className="text-2xs text-gray-500 dark:text-gray-400 px-3 py-1.5 rounded-full border border-gray-200 dark:border-[var(--border)] hover:bg-gray-50 dark:hover:bg-[var(--surface-3)] transition-colors"
-                      >
-                        Cancel
-                      </button>
-                    </div>
                   </div>
                 )}
               </div>
@@ -3415,6 +3994,20 @@ export default function BatchesView({ batches, onBatchesChange, initialBatchId, 
               )}
             </div>
 
+            {/* Needs my action filter */}
+            <button
+              onClick={() => setNeedsMyAction(v => !v)}
+              aria-pressed={needsMyAction}
+              className={`flex items-center gap-1.5 text-2xs py-1.5 px-2.5 rounded-lg border transition-colors ${
+                needsMyAction
+                  ? 'bg-[var(--color-50)] dark:bg-[var(--color-950)]/20 border-[var(--color-300)] dark:border-[var(--color-700)] text-[var(--color-700)] dark:text-[var(--color-300)]'
+                  : 'bg-white dark:bg-[var(--color-1)] border-gray-200 dark:border-[var(--border)] text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-[var(--surface-3)]'
+              }`}
+            >
+              <AlertCircle aria-hidden="true" className="w-3 h-3 flex-shrink-0" strokeWidth={2} />
+              <span className="font-medium">Needs my action</span>
+            </button>
+
             {/* Clear all */}
             {isAnyFiltered && (
               <button
@@ -3426,6 +4019,7 @@ export default function BatchesView({ batches, onBatchesChange, initialBatchId, 
                   setShowArchived(false);
                   setCpFilter(new Set());
                   setCpSearch('');
+                  setNeedsMyAction(false);
                   setFocusedIndex(0);
                 }}
                 className="text-2xs text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 transition-colors ml-1"
@@ -3487,7 +4081,7 @@ export default function BatchesView({ batches, onBatchesChange, initialBatchId, 
                   <Calendar aria-hidden="true" className="w-8 h-8 opacity-40" strokeWidth={1.5} />
                   <p className="text-sm">No batches match the current filters</p>
                   <button
-                    onClick={() => { setDatePreset('all'); setCustomFrom(''); setCustomTo(''); setStatusFilter(new Set()); setShowArchived(false); setCpFilter(new Set()); }}
+                    onClick={() => { setDatePreset('all'); setCustomFrom(''); setCustomTo(''); setStatusFilter(new Set()); setShowArchived(false); setCpFilter(new Set()); setNeedsMyAction(false); }}
                     className="text-2xs text-[var(--color-700)] dark:text-[var(--color-300)] hover:underline"
                   >
                     Clear filters
@@ -3500,6 +4094,7 @@ export default function BatchesView({ batches, onBatchesChange, initialBatchId, 
                       {sortTh('id',           'Batch ID',    'text-left pl-4 pr-2 py-2')}
                       {sortTh('counterparty', 'Counterparty','text-left px-2 py-2')}
                       {sortTh('status',       'Status',      'text-left px-2 py-2')}
+                      {sortTh('direction',    'Direction',   'text-left px-2 py-2')}
                       {sortTh('cutoff',       'Cutoff',      'text-left px-2 py-2')}
                       {sortTh('obligations',  '# Obligations','text-right px-2 py-2')}
                       {sortTh('deliver',      'To deliver',  'text-right px-2 py-2')}
@@ -3529,6 +4124,9 @@ export default function BatchesView({ batches, onBatchesChange, initialBatchId, 
                           <td className="px-2 py-1.5">
                             <StatusBadge status={batch.origin === 'requested' && batch.status === 'Draft' ? 'Pending' : batch.status} />
                           </td>
+                          <td className="px-2 py-1.5">
+                            <OriginPill origin={batch.origin} />
+                          </td>
                           <td className="px-2 py-1.5 text-gray-500 dark:text-gray-400 tabular-nums">{fmtCutoff(batch.cutoffTime)}</td>
                           <td className="text-right px-2 py-1.5 tabular-nums text-gray-600 dark:text-gray-300">{batch.deliverObligations.length + batch.receiveObligations.length}</td>
                           <td className="text-right px-2 py-1.5 tabular-nums text-[var(--negative)]">{bDeliver > 0 ? fmtUsdFull(bDeliver) : '—'}</td>
@@ -3542,13 +4140,13 @@ export default function BatchesView({ batches, onBatchesChange, initialBatchId, 
                     {/* Infinite-scroll sentinel + footer */}
                     {visibleRows < sortedBatchTable.length ? (
                       <tr ref={sentinelRef}>
-                        <td colSpan={8} className="text-center py-4 text-2xs text-gray-400 dark:text-gray-500">
+                        <td colSpan={9} className="text-center py-4 text-2xs text-gray-400 dark:text-gray-500">
                           Loading more… ({visibleRows} of {sortedBatchTable.length})
                         </td>
                       </tr>
                     ) : sortedBatchTable.length > ROW_PAGE ? (
                       <tr>
-                        <td colSpan={8} className="text-center py-3 text-2xs text-gray-400 dark:text-gray-500">
+                        <td colSpan={9} className="text-center py-3 text-2xs text-gray-400 dark:text-gray-500">
                           End of list — {sortedBatchTable.length} batches
                         </td>
                       </tr>
@@ -3563,6 +4161,13 @@ export default function BatchesView({ batches, onBatchesChange, initialBatchId, 
         {showImport && (
           <ImportModal onConfirm={handleImportConfirm} onClose={() => setShowImport(false)} existingCounterparties={allCounterparties} />
         )}
+        <NewBatchModal
+          open={showNewBatchForm}
+          onClose={() => setShowNewBatchForm(false)}
+          onCreate={createBlankBatch}
+          allCounterparties={allCounterparties}
+          defaultCutoff={getNextCycleCutoffLocal()}
+        />
       </>
     );
   }
@@ -3594,6 +4199,7 @@ export default function BatchesView({ batches, onBatchesChange, initialBatchId, 
 
         {/* ── LEFT PANEL: searchable batch list (resizable) ────────── */}
         <div
+          ref={sidebarPanelRef}
           style={{ width: `${sidebarWidth}%` }}
           className="flex-shrink-0 flex flex-col border-r border-gray-100 dark:border-[var(--border)] bg-white dark:bg-black relative z-10 min-w-[260px]"
         >
@@ -3630,37 +4236,6 @@ export default function BatchesView({ batches, onBatchesChange, initialBatchId, 
                 </div>
               )}
 
-              {showNewBatchForm && (
-                <div ref={newBatchFormRef} className="absolute right-0 top-full mt-1 bg-white dark:bg-[var(--color-2)] border border-gray-200 dark:border-[var(--border)] rounded-xl shadow-xl z-50 dropdown-enter w-64 p-3">
-                  <p className="text-[10px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-2.5">New batch</p>
-                  <div className="mb-2.5">
-                    <label className="text-[10px] text-gray-400 dark:text-gray-500 mb-1 block">Counterparty</label>
-                    <input
-                      type="text"
-                      placeholder="Search counterparty…"
-                      value={newBatchCP}
-                      onChange={e => { setNewBatchCP(e.target.value); setNewBatchCPSearch(e.target.value); }}
-                      className="w-full text-2xs bg-gray-50 dark:bg-[var(--surface-3)] border border-gray-200 dark:border-[var(--border)] rounded-md px-2 py-1.5 text-gray-700 dark:text-gray-200 focus:outline-none focus:ring-1 focus:ring-[var(--color-700)]"
-                      autoFocus
-                    />
-                    {newBatchCPSearch && (
-                      <div className="mt-1 border border-gray-100 dark:border-[var(--border)] rounded-lg overflow-hidden shadow-sm max-h-32 overflow-y-auto">
-                        {allCounterparties.filter(cp => cp.toLowerCase().includes(newBatchCPSearch.toLowerCase())).slice(0, 6).map(cp => (
-                          <button key={cp} onClick={() => { setNewBatchCP(cp); setNewBatchCPSearch(''); }} className="w-full text-left px-2.5 py-1.5 text-2xs hover-item text-gray-700 dark:text-gray-200 transition-colors">{cp}</button>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                  <div className="mb-3">
-                    <label className="text-[10px] text-gray-400 dark:text-gray-500 mb-1 block">Cutoff time</label>
-                    <input type="datetime-local" value={newBatchCutoff} onChange={e => setNewBatchCutoff(e.target.value)} className="w-full text-2xs bg-gray-50 dark:bg-[var(--surface-3)] border border-gray-200 dark:border-[var(--border)] rounded-md px-2 py-1.5 text-gray-700 dark:text-gray-200 focus:outline-none focus:ring-1 focus:ring-[var(--color-700)]" />
-                  </div>
-                  <div className="flex gap-2">
-                    <button onClick={createBlankBatch} disabled={!newBatchCP.trim()} className="flex-1 text-2xs font-semibold bg-[#CDF698] hover:bg-[var(--color-200)] text-gray-900 px-3 py-1.5 rounded-full transition-colors disabled:opacity-40 disabled:cursor-not-allowed">Create</button>
-                    <button onClick={() => { setShowNewBatchForm(false); setNewBatchCP(''); setNewBatchCutoff(''); setNewBatchCPSearch(''); }} className="text-2xs text-gray-500 dark:text-gray-400 px-3 py-1.5 rounded-full border border-gray-200 dark:border-[var(--border)] hover:bg-gray-50 dark:hover:bg-[var(--surface-3)] transition-colors">Cancel</button>
-                  </div>
-                </div>
-              )}
             </div>
           </div>
 
@@ -3837,6 +4412,20 @@ export default function BatchesView({ batches, onBatchesChange, initialBatchId, 
                 </div>
               )}
             </div>
+
+            {/* Needs my action chip */}
+            <button
+              onClick={() => setNeedsMyAction(v => !v)}
+              aria-pressed={needsMyAction}
+              className={`flex items-center gap-1 text-[10px] font-medium px-2 py-0.5 rounded-full border transition-colors ${
+                needsMyAction
+                  ? 'bg-[var(--color-50)] dark:bg-[var(--color-950)]/20 border-[var(--color-300)] dark:border-[var(--color-700)] text-[var(--color-700)] dark:text-[var(--color-300)]'
+                  : 'border-gray-200 dark:border-[var(--border)] text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-[var(--surface-3)]'
+              }`}
+            >
+              <AlertCircle aria-hidden="true" className="w-2.5 h-2.5" strokeWidth={2} />
+              Needs my action
+            </button>
           </div>
 
           {/* Compact batch table */}
@@ -3852,15 +4441,32 @@ export default function BatchesView({ batches, onBatchesChange, initialBatchId, 
               <div className="flex flex-col items-center justify-center py-10 text-center gap-2">
                 <Search aria-hidden="true" className="w-6 h-6 text-gray-300 dark:text-gray-600" strokeWidth={1.5} />
                 <p className="text-xs text-gray-400 dark:text-gray-500">No batches found</p>
-                <button onClick={() => { setListSearch(''); setDatePreset('all'); setCustomFrom(''); setCustomTo(''); setStatusFilter(new Set()); setShowArchived(false); setCpFilter(new Set()); }} className="text-2xs text-[var(--color-700)] dark:text-[var(--color-300)] hover:underline">Clear filters</button>
+                <button onClick={() => { setListSearch(''); setDatePreset('all'); setCustomFrom(''); setCustomTo(''); setStatusFilter(new Set()); setShowArchived(false); setCpFilter(new Set()); setNeedsMyAction(false); }} className="text-2xs text-[var(--color-700)] dark:text-[var(--color-300)] hover:underline">Clear filters</button>
               </div>
             ) : (
+              (() => {
+                // Reveal more columns as the sidebar gets wider. The cutoff is
+                // stacked under the counterparty name in the narrowest layout
+                // and pulled into its own column once there's room.
+                const showCutoffCol = sidebarPxWidth >= 420;
+                const showOblCountCol = sidebarPxWidth >= 540;
+                const showDeliverReceiveCols = sidebarPxWidth >= 660;
+                return (
               <table className="w-full text-xs">
                 <thead className="sticky-thead">
                   <tr>
-                    <th className="table-compact pl-2 text-left text-[10px] text-gray-400 dark:text-gray-500 font-medium uppercase tracking-wide w-full">Counterparty</th>
-                    <th className="table-compact pr-2 text-left text-[10px] text-gray-400 dark:text-gray-500 font-medium uppercase tracking-wide whitespace-nowrap">Status</th>
-                    <th className="table-compact text-right text-[10px] text-gray-400 dark:text-gray-500 font-medium uppercase tracking-wide whitespace-nowrap">Net</th>
+                    {sortTh('counterparty', 'Counterparty', 'table-compact pl-2 text-left text-[10px] text-gray-400 dark:text-gray-500 uppercase tracking-wide w-full')}
+                    {sortTh('status',       'Status',       'table-compact pr-2 text-left text-[10px] text-gray-400 dark:text-gray-500 uppercase tracking-wide whitespace-nowrap')}
+                    {sortTh('direction',    'Direction',    'table-compact pr-2 text-left text-[10px] text-gray-400 dark:text-gray-500 uppercase tracking-wide whitespace-nowrap')}
+                    {showCutoffCol && sortTh('cutoff', 'Cutoff', 'table-compact pr-2 text-left text-[10px] text-gray-400 dark:text-gray-500 uppercase tracking-wide whitespace-nowrap')}
+                    {showOblCountCol && sortTh('obligations', 'Obl', 'table-compact pr-2 text-right text-[10px] text-gray-400 dark:text-gray-500 uppercase tracking-wide whitespace-nowrap')}
+                    {showDeliverReceiveCols && (
+                      <>
+                        {sortTh('deliver', 'Deliver', 'table-compact pr-2 text-right text-[10px] text-gray-400 dark:text-gray-500 uppercase tracking-wide whitespace-nowrap')}
+                        {sortTh('receive', 'Receive', 'table-compact pr-2 text-right text-[10px] text-gray-400 dark:text-gray-500 uppercase tracking-wide whitespace-nowrap')}
+                      </>
+                    )}
+                    {sortTh('net', 'Net', 'table-compact text-right text-[10px] text-gray-400 dark:text-gray-500 uppercase tracking-wide whitespace-nowrap')}
                   </tr>
                 </thead>
                 <tbody>
@@ -3870,6 +4476,7 @@ export default function BatchesView({ batches, onBatchesChange, initialBatchId, 
                     const bDeliver = batch.deliverObligations.reduce((s, o) => s + o.amountUsd, 0);
                     const bReceive = batch.receiveObligations.reduce((s, o) => s + o.amountUsd, 0);
                     const bNet = bReceive - bDeliver;
+                    const oblCount = batch.deliverObligations.length + batch.receiveObligations.length;
                     return (
                       <tr
                         key={batch.id}
@@ -3887,13 +4494,38 @@ export default function BatchesView({ batches, onBatchesChange, initialBatchId, 
                             <CounterpartyAvatar name={batch.counterpartyName} size={18} />
                             <div className="min-w-0">
                               <div className={`text-[11px] font-medium truncate leading-tight ${isSelected ? 'text-gray-900 dark:text-gray-100' : 'text-gray-800 dark:text-gray-200'}`}>{batch.counterpartyName}</div>
-                              <div className="text-[10px] text-gray-400 dark:text-gray-500 tabular-nums leading-tight">{fmtCutoff(batch.cutoffTime)}</div>
+                              {!showCutoffCol && (
+                                <div className="text-[10px] text-gray-400 dark:text-gray-500 tabular-nums leading-tight">{fmtCutoff(batch.cutoffTime)}</div>
+                              )}
                             </div>
                           </div>
                         </td>
                         <td className="py-1.5 px-2">
                           <StatusBadge status={batch.origin === 'requested' && batch.status === 'Draft' ? 'Pending' : batch.status} pct={getBatchClearedPct(batch)} />
                         </td>
+                        <td className="py-1.5 px-2">
+                          <OriginPill origin={batch.origin} />
+                        </td>
+                        {showCutoffCol && (
+                          <td className="py-1.5 px-2 text-[10px] text-gray-500 dark:text-gray-400 tabular-nums whitespace-nowrap">
+                            {fmtCutoff(batch.cutoffTime)}
+                          </td>
+                        )}
+                        {showOblCountCol && (
+                          <td className="py-1.5 px-2 text-right text-[10px] text-gray-500 dark:text-gray-400 tabular-nums whitespace-nowrap">
+                            {oblCount}
+                          </td>
+                        )}
+                        {showDeliverReceiveCols && (
+                          <>
+                            <td className="py-1.5 px-2 text-right text-[10px] tabular-nums whitespace-nowrap text-[var(--negative)]">
+                              {bDeliver > 0 ? fmtUsdCompact(bDeliver) : '—'}
+                            </td>
+                            <td className="py-1.5 px-2 text-right text-[10px] tabular-nums whitespace-nowrap text-[var(--positive)]">
+                              {bReceive > 0 ? fmtUsdCompact(bReceive) : '—'}
+                            </td>
+                          </>
+                        )}
                         <td className="py-1.5 px-2 text-right text-[10px] whitespace-nowrap">
                           <span className={bNet >= 0 ? 'text-[var(--positive)]' : 'text-[var(--negative)]'}>
                             {bNet >= 0 ? '+' : '−'}{fmtUsdCompact(Math.abs(bNet))}
@@ -3904,6 +4536,8 @@ export default function BatchesView({ batches, onBatchesChange, initialBatchId, 
                   })}
                 </tbody>
               </table>
+                );
+              })()
             )}
           </div>
         </div>
@@ -3922,7 +4556,7 @@ export default function BatchesView({ batches, onBatchesChange, initialBatchId, 
           {showOverview ? (
             <PostedTotalOverview batches={batches} />
           ) : selectedBatch ? (
-            <BatchDetail batch={selectedBatch} onUpdate={handleBatchUpdate} onDelete={handleBatchDelete} />
+            <BatchDetail batch={selectedBatch} onUpdate={handleBatchUpdate} onDelete={handleBatchDelete} isDemo={isDemo} />
           ) : (
             <BatchesLanding
               filteredBatches={filteredBatches}
@@ -3936,6 +4570,13 @@ export default function BatchesView({ batches, onBatchesChange, initialBatchId, 
       {showImport && (
         <ImportModal onConfirm={handleImportConfirm} onClose={() => setShowImport(false)} existingCounterparties={allCounterparties} />
       )}
+      <NewBatchModal
+        open={showNewBatchForm}
+        onClose={() => setShowNewBatchForm(false)}
+        onCreate={createBlankBatch}
+        allCounterparties={allCounterparties}
+        defaultCutoff={getNextCycleCutoffLocal()}
+      />
     </div>
   );
 }

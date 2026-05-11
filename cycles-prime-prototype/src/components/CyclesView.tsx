@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef, KeyboardEvent } from 'react';
 import NumberFlow, { NumberFlowGroup } from '@number-flow/react';
-import { mockCycles } from '../data/mockData';
 import type { Cycle, SettlementTarget } from '../types';
 import {
   fmtUsdFull,
@@ -30,6 +29,40 @@ import {
   Calendar, Timer, History, TrendingUp, Users, RefreshCw, Check, Download,
   ArrowUp, ArrowDown, ChevronDown, ChevronRight, ChevronsDownUp, Search,
 } from 'lucide-react';
+
+// ── Demo helpers ─────────────────────────────────────────────────────────────
+
+/**
+ * Mirrors the makeCycle() formula in mockData.ts. Given a cycle and a target
+ * percentCleared (0–100), returns a new Cycle with all derived fields recomputed:
+ * clearedUsd / remainingUsd, deliver/receive splits, and per-asset / per-counterparty
+ * breakdowns. Used by the demo % slider so charts stay in sync as the user drags.
+ */
+function recomputeClearedFromPercent(cycle: Cycle, pct: number): Cycle {
+  const clamped = Math.max(0, Math.min(100, Math.round(pct)));
+  const ratio = clamped / 100;
+  const clearedUsd = Math.round(cycle.totalUsd * ratio);
+  const deliverClearedUsd = Math.round(cycle.deliverTotalUsd * ratio);
+  const receiveClearedUsd = clearedUsd - deliverClearedUsd;
+  return {
+    ...cycle,
+    percentCleared: clamped,
+    clearedUsd,
+    remainingUsd: cycle.totalUsd - clearedUsd,
+    deliverClearedUsd,
+    deliverRemainingUsd: cycle.deliverTotalUsd - deliverClearedUsd,
+    receiveClearedUsd,
+    receiveRemainingUsd: cycle.receiveTotalUsd - receiveClearedUsd,
+    obligationsByAsset: cycle.obligationsByAsset.map((o) => {
+      const c = Math.round(o.totalUsd * ratio);
+      return { ...o, clearedUsd: c, remainingUsd: o.totalUsd - c };
+    }),
+    obligationsByCounterparty: cycle.obligationsByCounterparty.map((o) => {
+      const c = Math.round(o.totalUsd * ratio);
+      return { ...o, clearedUsd: c, remainingUsd: o.totalUsd - c };
+    }),
+  };
+}
 
 // ── Status badge ──────────────────────────────────────────────────────────────
 
@@ -181,9 +214,11 @@ function PastCycleItem({
 function TricklingPanel({
   cycle,
   batches,
+  onSettle,
 }: {
   cycle: Cycle;
   batches: import('../types').Batch[];
+  onSettle?: () => void;
 }) {
   const [parts, setParts] = useState(() => getCountdownParts(cycle.scheduledHourUtc));
   const [breakdown, setBreakdown] = useState<'asset' | 'batches'>('asset');
@@ -225,6 +260,23 @@ function TricklingPanel({
 
   return (
     <div className="h-full overflow-y-auto p-5 space-y-4">
+
+      {/* Demo bar — only when isDemo */}
+      {onSettle && (
+        <div className="rounded-lg border border-amber-300/70 dark:border-amber-700/60 bg-amber-50/60 dark:bg-amber-900/10 px-4 py-2.5 flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2 text-[11px]">
+            <Timer aria-hidden="true" className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400 flex-shrink-0" strokeWidth={2} />
+            <span className="font-semibold text-amber-700 dark:text-amber-300">Demo</span>
+            <span className="text-amber-700/80 dark:text-amber-400/80">Skip the countdown and clear this cycle now</span>
+          </div>
+          <button
+            onClick={onSettle}
+            className="text-[11px] font-semibold bg-[#CDF698] hover:bg-[var(--color-200)] text-gray-900 px-3 py-1.5 rounded-full transition-colors active:scale-[0.97] whitespace-nowrap"
+          >
+            Settle now
+          </button>
+        </div>
+      )}
 
       {/* Upcoming cycle hero — side-by-side */}
       <div className="px-5 pt-3 pb-1">
@@ -1178,7 +1230,7 @@ function PostClearingTable({ cycle, batches }: { cycle: Cycle; batches: import('
 
 // ── Right panel: selected cycle detail ───────────────────────────────────────
 
-function CycleDetailPanel({ cycle, batches }: { cycle: Cycle; batches: import('../types').Batch[] }) {
+function CycleDetailPanel({ cycle, batches, onPercentChange }: { cycle: Cycle; batches: import('../types').Batch[]; onPercentChange?: (pct: number) => void }) {
   const isDark = useDarkMode();
   const [chartBreakdown, setChartBreakdown] = useState<'counterparty' | 'asset'>('counterparty');
   const [tableBreakdown, setTableBreakdown] = useState<'counterparty' | 'asset'>('counterparty');
@@ -1254,6 +1306,29 @@ function CycleDetailPanel({ cycle, batches }: { cycle: Cycle; batches: import('.
           </button>
         )}
       </div>
+
+      {/* Demo slider — only for the most recent completed cycle in demo mode */}
+      {onPercentChange && !cycle.isScheduled && (
+        <div className="rounded-lg border border-amber-300/70 dark:border-amber-700/60 bg-amber-50/60 dark:bg-amber-900/10 px-4 py-2.5">
+          <div className="flex items-center justify-between gap-3 mb-1.5">
+            <div className="flex items-center gap-2 text-[11px]">
+              <span className="font-semibold text-amber-700 dark:text-amber-300">Demo</span>
+              <span className="text-amber-700/80 dark:text-amber-400/80">Drag to simulate clearing progress</span>
+            </div>
+            <span className="text-xs font-bold tabular-nums text-amber-700 dark:text-amber-300">{cycle.percentCleared}%</span>
+          </div>
+          <input
+            type="range"
+            min={0}
+            max={100}
+            step={1}
+            value={cycle.percentCleared}
+            onChange={(e) => onPercentChange(Number(e.target.value))}
+            aria-label="Cycle percent cleared"
+            className="w-full accent-[var(--color-700)]"
+          />
+        </div>
+      )}
 
       {cycle.isScheduled ? (
         <PreClearingTable cycle={cycle} />
@@ -1401,15 +1476,44 @@ function CycleDetailPanel({ cycle, batches }: { cycle: Cycle; batches: import('.
 
 interface CyclesViewProps {
   batches: import('../types').Batch[];
+  cycles: Cycle[];
+  onCyclesChange: (cycles: Cycle[]) => void;
+  isDemo: boolean;
 }
 
-export default function CyclesView({ batches }: CyclesViewProps) {
-  const allCycles   = mockCycles;
+export default function CyclesView({ batches, cycles, onCyclesChange, isDemo }: CyclesViewProps) {
+  const allCycles   = cycles;
   const scheduledCycle = allCycles.find((c) => c.isScheduled) ?? null;
   const pastCycles  = allCycles.filter((c) => !c.isScheduled);
 
-  const [selectedCycle, setSelectedCycle] = useState<Cycle | null>(() => scheduledCycle ?? pastCycles[0] ?? null);
+  // Track selection by id so it survives mutations to `cycles` (e.g. demo slider).
+  const [selectedCycleId, setSelectedCycleId] = useState<string | null>(
+    () => scheduledCycle?.id ?? pastCycles[0]?.id ?? null
+  );
+  const selectedCycle = allCycles.find((c) => c.id === selectedCycleId) ?? null;
+  const setSelectedCycle = useCallback((c: Cycle | null) => setSelectedCycleId(c?.id ?? null), []);
   const [focusedIndex, setFocusedIndex] = useState<number>(-1);
+
+  // ── Demo handlers ────────────────────────────────────────────────────────
+  const handleDemoSettle = useCallback(() => {
+    if (!scheduledCycle) return;
+    const settled = recomputeClearedFromPercent(
+      { ...scheduledCycle, isScheduled: false, status: 'Completed' },
+      0,
+    );
+    const others = allCycles.filter((c) => c.id !== scheduledCycle.id);
+    onCyclesChange([settled, ...others]);
+    setSelectedCycleId(settled.id);
+  }, [scheduledCycle, allCycles, onCyclesChange]);
+
+  const handleDemoPercentChange = useCallback(
+    (cycleId: string, pct: number) => {
+      onCyclesChange(allCycles.map((c) => (c.id === cycleId ? recomputeClearedFromPercent(c, pct) : c)));
+    },
+    [allCycles, onCyclesChange],
+  );
+
+  const mostRecentPastId = pastCycles[0]?.id;
 
   // Infinite scroll for the past-cycles list.
   const CYCLE_PAGE = 20;
@@ -1521,9 +1625,21 @@ export default function CyclesView({ batches }: CyclesViewProps) {
       <div className="flex-1 overflow-hidden bg-gray-50 dark:bg-[var(--color-1)]">
         <div className="h-full overflow-hidden">
           {selectedCycle?.isScheduled ? (
-            <TricklingPanel cycle={selectedCycle} batches={batches} />
+            <TricklingPanel
+              cycle={selectedCycle}
+              batches={batches}
+              onSettle={isDemo ? handleDemoSettle : undefined}
+            />
           ) : selectedCycle ? (
-            <CycleDetailPanel cycle={selectedCycle} batches={batches} />
+            <CycleDetailPanel
+              cycle={selectedCycle}
+              batches={batches}
+              onPercentChange={
+                isDemo && selectedCycle.id === mostRecentPastId
+                  ? (pct) => handleDemoPercentChange(selectedCycle.id, pct)
+                  : undefined
+              }
+            />
           ) : (
             <AccountOverview cycles={allCycles} batches={batches} onSelectCycle={setSelectedCycle} />
           )}
