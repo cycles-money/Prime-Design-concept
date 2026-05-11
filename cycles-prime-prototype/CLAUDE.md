@@ -14,6 +14,32 @@ No router — state-based tab navigation only.
 
 ---
 
+## Deployment
+
+The prototype is published to GitHub Pages from the `gh-pages` branch of
+[`cycles-money/Prime-Design-concept`](https://github.com/cycles-money/Prime-Design-concept).
+Because the repo is private, Pages serves it from a randomized subdomain
+(currently <https://cautious-adventure-y7477yo.pages.github.io/>) that
+requires being signed in as a repo collaborator.
+
+**To redeploy after any change**, from `cycles-prime-prototype/`:
+
+```bash
+npm run deploy
+```
+
+That single script:
+1. Runs `tsc && vite build` (production build with relative `./` asset URLs — see `vite.config.ts`).
+2. `cd`s into `dist/`, adds `.nojekyll`, inits a throwaway git repo on a `gh-pages` branch.
+3. Force-pushes that single-commit branch to origin, then cleans up the throwaway `.git`.
+4. GitHub builds the new Pages site in ~30s.
+
+**Why the throwaway-git approach (not a worktree, not Actions):** the only OAuth scope available is `repo` — the `gh-pages` branch can be pushed, but `.github/workflows/*.yml` cannot. Worktrees work too but leave history clutter; force-pushing a single commit keeps the branch clean.
+
+**If you ever want Actions-based deploy on push**, the OAuth token needs the `workflow` scope (`gh auth refresh -s workflow`). Then drop a workflow at `.github/workflows/deploy-pages.yml` that runs the same build and uses `actions/deploy-pages@v4`.
+
+---
+
 ## Figma MCP Integration — Required Flow
 
 **Follow these steps in order. Do not skip any step.**

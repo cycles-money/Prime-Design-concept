@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "deploy": "npm run build && cd dist && touch .nojekyll && rm -rf .git && git init -q -b gh-pages && git add -A && git -c user.email=deploy@cycles.money -c user.name=Deploy commit -q -m Deploy && git push -q --force https://github.com/cycles-money/Prime-Design-concept.git gh-pages && rm -rf .git && echo '✓ deployed to https://cautious-adventure-y7477yo.pages.github.io/'"
   },
   "dependencies": {
     "@number-flow/react": "^0.6.0",
