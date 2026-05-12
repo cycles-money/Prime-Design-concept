@@ -77,13 +77,30 @@ export function getCountdownParts(targetHourUtc: number): {
   };
 }
 
-/** Format a cutoff timestamp: '2026-03-14 11:00' → 'Mar 14 · 11:00 UTC' */
-export const fmtCutoff = (cutoffTime: string): string => {
+/** Format a cutoff timestamp: '2026-03-14 11:00' → 'Mar 14 · 11:00 UTC' (or
+ *  the user's local zone when `tz === 'local'`). Inputs are always stored as
+ *  UTC under the hood; `tz` only affects how it's rendered. */
+export const fmtCutoff = (cutoffTime: string, tz: 'utc' | 'local' = 'utc'): string => {
   const [datePart, timePart] = cutoffTime.split(' ');
   if (!datePart) return cutoffTime;
-  const d = new Date(datePart + 'T00:00:00Z');
-  const date = d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', timeZone: 'UTC' });
-  return timePart ? `${date} · ${timePart} UTC` : date;
+
+  if (tz === 'utc') {
+    const d = new Date(datePart + 'T00:00:00Z');
+    const date = d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', timeZone: 'UTC' });
+    return timePart ? `${date} · ${timePart} UTC` : date;
+  }
+
+  // Local: parse the stored UTC instant, then format date + time in the user's
+  // own zone (incl. a short tz label like "EDT" / "CET").
+  const iso = timePart ? `${datePart}T${timePart}:00Z` : `${datePart}T00:00:00Z`;
+  const d = new Date(iso);
+  const date = d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+  if (!timePart) return date;
+  const time = d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', hour12: false });
+  const tzLabel = Intl.DateTimeFormat(undefined, { timeZoneName: 'short' })
+    .formatToParts(d)
+    .find(p => p.type === 'timeZoneName')?.value ?? 'Local';
+  return `${date} · ${time} ${tzLabel}`;
 };
 
 /** Format a date string for display */

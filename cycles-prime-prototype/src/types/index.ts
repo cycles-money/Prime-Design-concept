@@ -69,6 +69,12 @@ export interface Cycle {
   status: CycleStatus;
   obligationsByAsset: ObligationByDimension[];
   obligationsByCounterparty: ObligationByDimension[];
+  /** Raw number of obligations rolled up into this cycle. Surfaced in the
+   *  history list as a quick "size" signal — more useful per Benji's transcript
+   *  than the previous Out/In totals or cleared %. */
+  obligationCount: number;
+  /** Raw number of batches rolled up into this cycle. */
+  batchCount: number;
 }
 
 export interface SettlementTarget {

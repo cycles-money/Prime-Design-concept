@@ -1,0 +1,14 @@
+counterparty,direction,token,amount_asset,amount_usd
+FalconX,deliver,BTC,12,780000
+FalconX,deliver,ETH,300,900000
+FalconX,receive,USDC,2100000,2100000
+Cumberland DRW,deliver,SOL,5000,750000
+Cumberland DRW,receive,USDC,600000,600000
+B2C2,deliver,BTC,8,520000
+B2C2,deliver,LTC,2500,200000
+B2C2,receive,USDT,900000,900000
+Wintermute,deliver,ETH,450,1350000
+Wintermute,receive,USDC,1050000,1050000
+Galaxy Digital,deliver,MATIC,1000000,800000
+Galaxy Digital,deliver,AVAX,15000,450000
+Galaxy Digital,receive,USDC,1600000,1600000

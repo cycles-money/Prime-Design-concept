@@ -401,19 +401,13 @@ export default function CounterpartiesView({ batches }: { batches: Batch[] }) {
                     </td>
                   </tr>
                 ))}
-                {visibleRows < filtered.length ? (
+                {visibleRows < filtered.length && (
                   <tr ref={sentinelRef}>
                     <td colSpan={3} className="text-center py-4 text-2xs text-gray-400 dark:text-gray-500">
                       Loading more… ({visibleRows} of {filtered.length})
                     </td>
                   </tr>
-                ) : filtered.length > ROW_PAGE ? (
-                  <tr>
-                    <td colSpan={3} className="text-center py-3 text-2xs text-gray-400 dark:text-gray-500">
-                      End of list — {filtered.length} counterparties
-                    </td>
-                  </tr>
-                ) : null}
+                )}
               </tbody>
             </table>
           )}

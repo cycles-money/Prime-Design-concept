@@ -1,17 +1,20 @@
 import { useState, useEffect } from 'react';
 import { Agentation } from 'agentation';
-import { ClipboardList, RefreshCw, Users, Settings, CircleHelp, Sun, Moon, TrendingUp } from 'lucide-react';
+import { ClipboardList, RefreshCw, Settings, CircleHelp, Sun, Moon, TrendingUp } from 'lucide-react';
 import BatchesView from './components/BatchesView';
 import CyclesView from './components/CyclesView';
 import { AccountOverview } from './components/CyclesView';
 import SettingsView from './components/SettingsView';
 import HelpView from './components/HelpView';
-import CounterpartiesView from './components/CounterpartiesView';
 import { DarkModeContext } from './context/DarkModeContext';
+import { TimeZoneContext, type TimeZonePref } from './context/TimeZoneContext';
 import { mockBatches, mockCycles } from './data/mockData';
 import type { Batch, Cycle } from './types';
 
-type Tab = 'batches' | 'cycles' | 'counterparties' | 'settings' | 'help' | 'overview';
+// Counterparties are now managed by a central registry server — the user-facing
+// tab is gone, but the CounterpartiesView component is left in place for the
+// settings panel to surface if needed later.
+type Tab = 'batches' | 'cycles' | 'settings' | 'help' | 'overview';
 
 const isDemoMode = (): boolean => {
   try { return new URLSearchParams(window.location.search).get('demo') === '1'; }
@@ -22,7 +25,6 @@ const isDemoMode = (): boolean => {
 
 function BatchesIcon()       { return <ClipboardList aria-hidden="true" className="w-3.5 h-3.5" />; }
 function CyclesIcon()        { return <RefreshCw     aria-hidden="true" className="w-3.5 h-3.5" />; }
-function CounterpartiesIcon(){ return <Users         aria-hidden="true" className="w-3.5 h-3.5" />; }
 function SettingsIcon()      { return <Settings      aria-hidden="true" className="w-4 h-4" />; }
 function HelpIcon()          { return <CircleHelp    aria-hidden="true" className="w-4 h-4" />; }
 function SunIcon()           { return <Sun           aria-hidden="true" className="w-4 h-4" />; }
@@ -35,7 +37,6 @@ export default function App() {
   const [initialBatchId, setInitialBatchId] = useState<string | undefined>(undefined);
   const [initialCpFilter, setInitialCpFilter] = useState<string | undefined>(undefined);
   const [batchesKey, setBatchesKey] = useState(0);
-  const [cpKey, setCpKey] = useState(0);
   const isDemo = isDemoMode();
 
   // Reset a tab to its main page (clears any deep-link state and forces remount)
@@ -44,8 +45,6 @@ export default function App() {
       setInitialBatchId(undefined);
       setInitialCpFilter(undefined);
       setBatchesKey((k) => k + 1);
-    } else if (tab === 'counterparties') {
-      setCpKey((k) => k + 1);
     }
     setActiveTab(tab);
   };
@@ -55,6 +54,26 @@ export default function App() {
     return window.matchMedia('(prefers-color-scheme: dark)').matches;
   });
 
+  // Global time-zone preference. Defaults to UTC (matches today's behaviour);
+  // users can flip to their local zone in Settings.
+  const [tzPref, setTzPref] = useState<TimeZonePref>(() => {
+    const saved = localStorage.getItem('cycles-prime-tz');
+    return saved === 'local' ? 'local' : 'utc';
+  });
+  useEffect(() => {
+    localStorage.setItem('cycles-prime-tz', tzPref);
+  }, [tzPref]);
+  // Allow SettingsView (and anywhere else) to update the preference via a
+  // custom event without prop-drilling a setter.
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const next = (e as CustomEvent<TimeZonePref>).detail;
+      if (next === 'utc' || next === 'local') setTzPref(next);
+    };
+    window.addEventListener('set-tz-pref', handler);
+    return () => window.removeEventListener('set-tz-pref', handler);
+  }, []);
+
   useEffect(() => {
     document.documentElement.classList.toggle('dark', isDark);
     document.documentElement.style.colorScheme = isDark ? 'dark' : 'light';
@@ -63,8 +82,14 @@ export default function App() {
 
   useEffect(() => {
     const handler = (e: Event) => {
-      const tab = (e as CustomEvent<Tab>).detail;
-      if (tab) setActiveTab(tab);
+      const tab = (e as CustomEvent<Tab | 'counterparties'>).detail;
+      if (!tab) return;
+      // Counterparties tab was removed; route legacy dispatches to Batches.
+      if ((tab as string) === 'counterparties') {
+        setActiveTab('batches');
+        return;
+      }
+      setActiveTab(tab as Tab);
     };
     window.addEventListener('navigate-tab', handler);
     return () => window.removeEventListener('navigate-tab', handler);
@@ -89,6 +114,7 @@ export default function App() {
 
   return (
     <DarkModeContext.Provider value={isDark}>
+    <TimeZoneContext.Provider value={tzPref}>
       <a
         href="#main-content"
         className="sr-only focus:not-sr-only focus:absolute focus:top-2 focus:left-2 focus:z-50 focus:px-3 focus:py-1.5 focus:text-xs focus:font-medium focus:bg-white focus:text-[var(--color-800)] focus:rounded focus:shadow"
@@ -136,9 +162,9 @@ export default function App() {
 
           {/* Primary tab navigation — centered absolutely */}
           <nav className="absolute left-1/2 -translate-x-1/2 flex items-center h-full gap-0.5">
-            {(['batches', 'cycles', 'counterparties'] as Tab[]).map((tab) => {
-              const Icon = tab === 'batches' ? BatchesIcon : tab === 'cycles' ? CyclesIcon : CounterpartiesIcon;
-              const label = tab === 'counterparties' ? 'Counterparties' : tab.charAt(0).toUpperCase() + tab.slice(1);
+            {(['batches', 'cycles'] as Tab[]).map((tab) => {
+              const Icon = tab === 'batches' ? BatchesIcon : CyclesIcon;
+              const label = tab.charAt(0).toUpperCase() + tab.slice(1);
               const isActive = activeTab === tab;
               return (
                 <button
@@ -208,8 +234,7 @@ export default function App() {
         {/* ── Main content ─────────────────────────────────────────────────── */}
         <main id="main-content" className="flex-1 overflow-hidden">
           {activeTab === 'batches'        ? <BatchesView key={batchesKey} batches={batches} onBatchesChange={setBatches} initialBatchId={initialBatchId} initialCpFilter={initialCpFilter} isDemo={isDemo} />
-          : activeTab === 'cycles'         ? <CyclesView batches={batches} cycles={cycles} onCyclesChange={setCycles} isDemo={isDemo} />
-          : activeTab === 'counterparties' ? <CounterpartiesView key={cpKey} batches={batches} />
+          : activeTab === 'cycles'         ? <CyclesView batches={batches} onBatchesChange={setBatches} cycles={cycles} onCyclesChange={setCycles} isDemo={isDemo} />
           : activeTab === 'settings'       ? <SettingsView />
           : activeTab === 'overview'       ? (
               <div className="flex flex-col h-full overflow-hidden bg-gray-50 dark:bg-[var(--color-1)]">
@@ -241,6 +266,7 @@ export default function App() {
         </main>
       </div>
       {import.meta.env.DEV && <Agentation />}
+    </TimeZoneContext.Provider>
     </DarkModeContext.Provider>
   );
 }

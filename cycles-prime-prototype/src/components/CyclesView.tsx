@@ -147,14 +147,17 @@ function UpcomingCycleItem({
           </p>
         </div>
 
-        {/* Countdown */}
-        <NumberFlowGroup>
-          <span className={`text-base font-bold tabular-nums ${timeColor}`}>
-            <NumberFlow trend={-1} value={parseInt(parts.hh)} format={{ minimumIntegerDigits: 2 }} />
-            <span className="opacity-60 mx-0.5">:</span>
-            <NumberFlow trend={-1} value={parseInt(parts.mm)} digits={{ 1: { max: 5 } }} format={{ minimumIntegerDigits: 2 }} />
-          </span>
-        </NumberFlowGroup>
+        {/* Countdown — "In HH:MM" so the meaning of the digits is obvious. */}
+        <span className={`flex items-baseline gap-1 ${timeColor}`}>
+          <span className="text-[10px] uppercase tracking-wide font-semibold">In</span>
+          <NumberFlowGroup>
+            <span className="text-base font-bold tabular-nums">
+              <NumberFlow trend={-1} value={parseInt(parts.hh)} format={{ minimumIntegerDigits: 2 }} />
+              <span className="opacity-60 mx-0.5">:</span>
+              <NumberFlow trend={-1} value={parseInt(parts.mm)} digits={{ 1: { max: 5 } }} format={{ minimumIntegerDigits: 2 }} />
+            </span>
+          </NumberFlowGroup>
+        </span>
       </div>
     </button>
   );
@@ -166,13 +169,19 @@ function PastCycleItem({
   cycle,
   isSelected,
   isFocused,
+  isNew,
   onClick,
 }: {
   cycle: Cycle;
   isSelected: boolean;
   isFocused: boolean;
+  isNew?: boolean;
   onClick: () => void;
 }) {
+  // Date + scale info (batch and obligation counts) per Benji's transcript:
+  // "number of batches or obligations is more valuable than these numbers".
+  // Avatars / counterparty count were dropped because mock data always uses
+  // the same headline counterparties — so they don't distinguish cycles.
   return (
     <button
       onClick={onClick}
@@ -184,27 +193,19 @@ function PastCycleItem({
         ${isFocused && !isSelected ? 'ring-1 ring-gray-300 dark:ring-gray-600' : ''}
       `}
     >
-      {/* Row 1: date (left) · ↑ Out cleared amount (right) */}
-      <div className="flex items-baseline justify-between gap-2">
+      <div className="flex items-center justify-between gap-2">
         <p className="text-xs font-semibold text-gray-700 dark:text-gray-200 truncate">{fmtDate(cycle.date)}</p>
-        <span className="inline-flex items-center gap-1 text-[10px] tabular-nums text-gray-500 dark:text-gray-400 flex-shrink-0">
-          <ArrowUp aria-hidden="true" className="w-3 h-3 text-[var(--negative)] flex-shrink-0" strokeWidth={2} />
-          <span>Out</span>
-          <span className="font-semibold text-gray-700 dark:text-gray-200">{fmtUsdCompact(cycle.deliverClearedUsd)}</span>
-        </span>
+        {isNew && (
+          <span
+            aria-label="New cycle"
+            title="New — just generated"
+            className="w-1.5 h-1.5 rounded-full bg-[var(--color-500)] dark:bg-[var(--color-300)] flex-shrink-0"
+          />
+        )}
       </div>
-
-      {/* Row 2: % cleared (left, under the date) · ↓ In cleared amount (right, under Out) */}
-      <div className="flex items-baseline justify-between gap-2 mt-0.5">
-        <p className="text-[10px] font-medium text-gray-500 dark:text-gray-400 tabular-nums">
-          {cycle.percentCleared}% cleared
-        </p>
-        <span className="inline-flex items-center gap-1 text-[10px] tabular-nums text-gray-500 dark:text-gray-400 flex-shrink-0">
-          <ArrowDown aria-hidden="true" className="w-3 h-3 text-[var(--positive)] flex-shrink-0" strokeWidth={2} />
-          <span>In</span>
-          <span className="font-semibold text-gray-700 dark:text-gray-200">{fmtUsdCompact(cycle.receiveClearedUsd)}</span>
-        </span>
-      </div>
+      <p className="text-[10px] tabular-nums text-gray-400 dark:text-gray-500 mt-0.5">
+        {cycle.batchCount} batch{cycle.batchCount === 1 ? '' : 'es'} · {cycle.obligationCount.toLocaleString()} obligation{cycle.obligationCount === 1 ? '' : 's'}
+      </p>
     </button>
   );
 }
@@ -684,22 +685,56 @@ function AssetXAxisTick({
   y,
   payload,
   showLabel = true,
+  diagonal = false,
 }: {
   x?: number;
   y?: number;
   payload?: { value: string };
   showLabel?: boolean;
+  /** When true, render the label rotated -32° below the icon — used when
+   *  there are too many assets to fit horizontal labels side-by-side. */
+  diagonal?: boolean;
 }) {
   if (x == null || y == null || !payload) return null;
   const symbol = payload.value;
   const iconUrl = getCryptoIconUrl(symbol);
   const fallbackColor = CRYPTO_COLORS[symbol] ?? '#6b7280';
   const iconSize = 16;
+  const cy = y + 10;
+
+  if (diagonal) {
+    // Icon stacked above a diagonal label — saves horizontal width when the
+    // axis is crowded.
+    return (
+      <g>
+        <clipPath id={`clip-${symbol}`}>
+          <circle cx={x} cy={cy} r={iconSize / 2} />
+        </clipPath>
+        {iconUrl ? (
+          <image href={iconUrl} x={x - iconSize / 2} y={cy - iconSize / 2} width={iconSize} height={iconSize} clipPath={`url(#clip-${symbol})`} />
+        ) : (
+          <circle cx={x} cy={cy} r={iconSize / 2} fill={fallbackColor} />
+        )}
+        {showLabel && (
+          <text
+            x={x}
+            y={cy + iconSize / 2 + 4}
+            textAnchor="end"
+            fontSize={10}
+            fill="#9ca3af"
+            transform={`rotate(-32 ${x} ${cy + iconSize / 2 + 4})`}
+          >
+            {symbol}
+          </text>
+        )}
+      </g>
+    );
+  }
+
   const gap = 4;
   const textEstW = showLabel ? symbol.length * 7.5 : 0;
   const totalW = iconSize + (showLabel ? gap + textEstW : 0);
   const startX = x - totalW / 2;
-  const cy = y + 10;
 
   return (
     <g>
@@ -888,6 +923,19 @@ function PostClearingTable({ cycle, batches }: { cycle: Cycle; batches: import('
     const subtotalReceived  = rows.reduce((s, r) => s + r.receivedByClearing, 0);
     return { asset: assetRow.name, rows, subtotalPosted: totalAmt, subtotalDelivered, subtotalReceived, subtotalClearedUsd: assetRow.clearedUsd };
   });
+
+  // Resolve a per-row Batch ID by matching against the cycle's cleared batches.
+  // The cleared-rows table is derived per-asset, so for a (counterparty, asset,
+  // side) combo we pick the first matching cleared batch. Falls back to "—"
+  // when no real batch matches (typical in the synthetic per-asset breakdown).
+  const findBatchId = (cp: string, asset: string, side: 'deliver' | 'receive'): string => {
+    const match = cycleBatches.find((b) => {
+      if (b.counterpartyName !== cp) return false;
+      const obs = side === 'deliver' ? b.deliverObligations : b.receiveObligations;
+      return obs.some((o) => o.asset === asset);
+    });
+    return match?.id ?? '—';
+  };
 
   // Build counterparty-grouped data
   const cpGroups = (() => {
@@ -1152,7 +1200,7 @@ function PostClearingTable({ cycle, batches }: { cycle: Cycle; batches: import('
                     <table className="w-full text-xs">
                       <thead>
                         <tr className="bg-gray-50 dark:bg-[var(--color-1)] border-b border-gray-100 dark:border-[var(--border)] text-[10px] uppercase tracking-wide text-gray-500 dark:text-gray-400">
-                          <th className="text-left pl-4 pr-2 py-2 font-medium">ID</th>
+                          <th className="text-left pl-4 pr-2 py-2 font-medium">Batch ID</th>
                           <th className="text-left px-2 py-2 font-medium">Counterparty</th>
                           <th className="text-left px-2 py-2 font-medium">Direction</th>
                           <th className="text-right px-2 py-2 font-medium">Posted</th>
@@ -1165,7 +1213,7 @@ function PostClearingTable({ cycle, batches }: { cycle: Cycle; batches: import('
                       <tbody>
                         {group.rows.map((row) => (
                           <tr key={row.id} className={`group hover-row border-b border-gray-50 dark:border-[var(--border)] last:border-b-0 transition-colors ${row.side === 'deliver' ? 'row-deliver' : 'row-receive'}`}>
-                            <td className="pl-4 pr-2 py-1.5 text-[10px] text-gray-400 dark:text-gray-500">{row.id}</td>
+                            <td className="pl-4 pr-2 py-1.5 text-[10px] text-gray-400 dark:text-gray-500 tabular-nums">{findBatchId(row.counterparty, group.asset, row.side)}</td>
                             <td className="px-2 py-1.5">
                               <div className="flex items-center gap-1.5">
                                 <CounterpartyAvatar name={row.counterparty} size={18} />
@@ -1307,13 +1355,14 @@ function CycleDetailPanel({ cycle, batches, onPercentChange }: { cycle: Cycle; b
         )}
       </div>
 
-      {/* Demo slider — only for the most recent completed cycle in demo mode */}
+      {/* Cleared-% slider — available on any past cycle. Drag to adjust how
+          much of the cycle is cleared; the KPI tiles + chart update live. */}
       {onPercentChange && !cycle.isScheduled && (
         <div className="rounded-lg border border-amber-300/70 dark:border-amber-700/60 bg-amber-50/60 dark:bg-amber-900/10 px-4 py-2.5">
           <div className="flex items-center justify-between gap-3 mb-1.5">
             <div className="flex items-center gap-2 text-[11px]">
-              <span className="font-semibold text-amber-700 dark:text-amber-300">Demo</span>
-              <span className="text-amber-700/80 dark:text-amber-400/80">Drag to simulate clearing progress</span>
+              <span className="font-semibold text-amber-700 dark:text-amber-300">Cleared</span>
+              <span className="text-amber-700/80 dark:text-amber-400/80">Drag to adjust clearing progress</span>
             </div>
             <span className="text-xs font-bold tabular-nums text-amber-700 dark:text-amber-300">{cycle.percentCleared}%</span>
           </div>
@@ -1330,11 +1379,7 @@ function CycleDetailPanel({ cycle, batches, onPercentChange }: { cycle: Cycle; b
         </div>
       )}
 
-      {cycle.isScheduled ? (
-        <PreClearingTable cycle={cycle} />
-      ) : (
-        <>
-          {/* KPI row */}
+      {/* KPI row */}
           <div className="grid grid-cols-2 gap-4">
             {/* Deliver box */}
             <div className="bg-white dark:bg-[var(--color-2)] rounded-xl dark:border dark:border-[var(--border)] px-5 py-4">
@@ -1380,9 +1425,8 @@ function CycleDetailPanel({ cycle, batches, onPercentChange }: { cycle: Cycle; b
             </div>
           </div>
 
-          {/* Charts side by side */}
-          <div className="grid grid-cols-2 gap-4">
-            {/* Bar chart — switches with breakdown */}
+          {/* Bar chart */}
+          <div>
             <div className="bg-white dark:bg-[var(--color-2)] rounded-xl dark:border dark:border-[var(--border)] overflow-hidden flex flex-col h-[280px]">
               <div className="px-5 py-3 border-b border-gray-100 dark:border-[var(--border)] flex items-center justify-between gap-2 flex-shrink-0">
                 <p className="text-xs font-semibold text-gray-700 dark:text-gray-200">
@@ -1394,32 +1438,43 @@ function CycleDetailPanel({ cycle, batches, onPercentChange }: { cycle: Cycle; b
                 <ResponsiveContainer width="100%" height="100%">
                   <BarChart data={barData} margin={{ top: 4, right: 4, left: 0, bottom: 4 }}>
                     <CartesianGrid strokeDasharray="3 3" stroke={gridStroke} vertical={false} />
-                    {chartBreakdown === 'counterparty' ? (
-                      <XAxis
-                        dataKey="name"
-                        tick={{ fontSize: 10, fill: tickColor }}
-                        tickFormatter={(v: string) => truncateAxisLabel(v, 12)}
-                        angle={-32}
-                        textAnchor="end"
-                        height={64}
-                        axisLine={false}
-                        tickLine={false}
-                        interval={0}
-                      />
-                    ) : (
-                      <XAxis
-                        dataKey="name"
-                        tick={<AssetXAxisTick showLabel={barData.length <= 8} />}
-                        height={32}
-                        axisLine={false}
-                        tickLine={false}
-                        interval={0}
-                      />
-                    )}
+                    {(() => {
+                      // Diagonal labels only when we'd otherwise overflow — for
+                      // small N (≤6 counterparties / ≤5 assets) labels fit
+                      // horizontally and read more easily.
+                      const tickFs = 10;
+                      if (chartBreakdown === 'counterparty') {
+                        const diagonal = barData.length > 6;
+                        return (
+                          <XAxis
+                            dataKey="name"
+                            tick={{ fontSize: tickFs, fill: tickColor }}
+                            tickFormatter={(v: string) => truncateAxisLabel(v, diagonal ? 12 : 16)}
+                            angle={diagonal ? -32 : 0}
+                            textAnchor={diagonal ? 'end' : 'middle'}
+                            height={diagonal ? 64 : 28}
+                            axisLine={false}
+                            tickLine={false}
+                            interval={0}
+                          />
+                        );
+                      }
+                      const diagonal = barData.length > 5;
+                      return (
+                        <XAxis
+                          dataKey="name"
+                          tick={<AssetXAxisTick showLabel={barData.length <= 8} diagonal={diagonal} />}
+                          height={diagonal ? 48 : 32}
+                          axisLine={false}
+                          tickLine={false}
+                          interval={0}
+                        />
+                      );
+                    })()}
                     <YAxis tickFormatter={(v) => fmtUsdCompact(v)} tick={{ fontSize: 9, fill: tickColor }} axisLine={false} tickLine={false} width={44} />
                     <Tooltip content={<BarTooltip />} cursor={{ fill: 'rgba(128,128,128,0.05)' }} />
-                    <Bar dataKey="Cleared" stackId="a" fill={CLR_CLEARED} />
-                    <Bar dataKey="Remaining" stackId="a" fill={CLR_REMAINING} radius={[3, 3, 0, 0]} />
+                    <Bar dataKey="Remaining" stackId="a" fill={CLR_REMAINING} />
+                    <Bar dataKey="Cleared" stackId="a" fill={CLR_CLEARED} radius={[3, 3, 0, 0]} />
                   </BarChart>
                 </ResponsiveContainer>
               </div>
@@ -1433,41 +1488,10 @@ function CycleDetailPanel({ cycle, batches, onPercentChange }: { cycle: Cycle; b
               </div>
             </div>
 
-            {/* Pie chart — always shows overall clearing split */}
-            <div className="bg-white dark:bg-[var(--color-2)] rounded-xl dark:border dark:border-[var(--border)] overflow-hidden flex flex-col h-[280px]">
-              <div className="px-4 py-2.5 border-b border-gray-100 dark:border-[var(--border)] flex-shrink-0">
-                <p className="text-xs font-semibold text-gray-700 dark:text-gray-200">Clearing split</p>
-              </div>
-              <div className="flex-1 min-h-0">
-                <ResponsiveContainer width="100%" height="100%">
-                  <PieChart>
-                    <Pie data={pieData} cx="50%" cy="50%" innerRadius={55} outerRadius={75} dataKey="value" startAngle={90} endAngle={-270} strokeWidth={0}>
-                      <Cell fill={CLR_CLEARED} stroke="none" />
-                      <Cell fill={CLR_REMAINING} stroke="none" />
-                    </Pie>
-                    <Tooltip formatter={(v: number) => [fmtUsdFull(v), '']} />
-                  </PieChart>
-                </ResponsiveContainer>
-              </div>
-              <div className="flex items-center justify-center gap-4 pb-3 flex-shrink-0">
-                {pieData.map((d, i) => (
-                  <div key={d.name} className="flex items-center gap-1.5">
-                    <span className="w-2.5 h-2.5 rounded-sm flex-shrink-0" style={{ background: i === 0 ? CLR_CLEARED : CLR_REMAINING }} />
-                    <span className="text-[10px] text-gray-500 dark:text-gray-400">{d.name}</span>
-                    <span className="text-[10px] tabular-nums font-semibold text-gray-700 dark:text-gray-200">{fmtUsdCompact(d.value)}</span>
-                    <span className="text-[10px] tabular-nums text-gray-400 dark:text-gray-500">
-                      {cycle.totalUsd > 0 ? `(${fmtPct((d.value / cycle.totalUsd) * 100)})` : ''}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            </div>
           </div>
 
-          {/* Cleared obligations table */}
-          <PostClearingTable cycle={cycle} batches={batches} />
-        </>
-      )}
+      {/* Cleared obligations table */}
+      <PostClearingTable cycle={cycle} batches={batches} />
     </div>
   );
 }
@@ -1476,12 +1500,13 @@ function CycleDetailPanel({ cycle, batches, onPercentChange }: { cycle: Cycle; b
 
 interface CyclesViewProps {
   batches: import('../types').Batch[];
+  onBatchesChange: (batches: import('../types').Batch[]) => void;
   cycles: Cycle[];
   onCyclesChange: (cycles: Cycle[]) => void;
   isDemo: boolean;
 }
 
-export default function CyclesView({ batches, cycles, onCyclesChange, isDemo }: CyclesViewProps) {
+export default function CyclesView({ batches, onBatchesChange, cycles, onCyclesChange, isDemo }: CyclesViewProps) {
   const allCycles   = cycles;
   const scheduledCycle = allCycles.find((c) => c.isScheduled) ?? null;
   const pastCycles  = allCycles.filter((c) => !c.isScheduled);
@@ -1491,7 +1516,24 @@ export default function CyclesView({ batches, cycles, onCyclesChange, isDemo }: 
     () => scheduledCycle?.id ?? pastCycles[0]?.id ?? null
   );
   const selectedCycle = allCycles.find((c) => c.id === selectedCycleId) ?? null;
-  const setSelectedCycle = useCallback((c: Cycle | null) => setSelectedCycleId(c?.id ?? null), []);
+  // Cycles just generated by Simulate — render a small "new" dot on each
+  // sidebar row until the user clicks into it (mirrors the batch behaviour).
+  const [newCycleIds, setNewCycleIds] = useState<Set<string>>(new Set());
+  const clearNewCycleBadge = useCallback((id: string) => {
+    setNewCycleIds((prev) => {
+      if (!prev.has(id)) return prev;
+      const next = new Set(prev);
+      next.delete(id);
+      return next;
+    });
+  }, []);
+  // Plain selection — does NOT clear the "new" badge. Clearing happens via the
+  // row's own onClick so programmatic selection (e.g. Simulate auto-selecting
+  // the just-cleared cycle) keeps the dot visible until the user actually
+  // clicks the row.
+  const setSelectedCycle = useCallback((c: Cycle | null) => {
+    setSelectedCycleId(c?.id ?? null);
+  }, []);
   const [focusedIndex, setFocusedIndex] = useState<number>(-1);
 
   // ── Demo handlers ────────────────────────────────────────────────────────
@@ -1512,6 +1554,114 @@ export default function CyclesView({ batches, cycles, onCyclesChange, isDemo }: 
     },
     [allCycles, onCyclesChange],
   );
+
+  // "Simulate next cycle" — runs the upcoming cycle end-to-end so the user
+  // can see a freshly-cleared cycle and its now-Cleared batches without
+  // waiting on the countdown. Also queues up the *next* upcoming cycle (same
+  // shape, +1 day, 0% cleared) so the sidebar isn't left without a Scheduled
+  // pill after running the simulation.
+  const handleSimulateCycle = useCallback(() => {
+    if (!scheduledCycle) return;
+    // Flip the upcoming cycle to completed at 60% cleared — a partial-cleared
+    // default the user can adjust up or down via the slider.
+    const cleared = recomputeClearedFromPercent(
+      { ...scheduledCycle, isScheduled: false, status: 'Completed' },
+      60,
+    );
+    // Generate the next upcoming cycle: +1 day, same totals, 0% cleared. The
+    // obligationsByAsset/Counterparty breakdowns get their cleared values
+    // reset so charts render a fresh "nothing cleared yet" state.
+    const nextDate = (() => {
+      const d = new Date(scheduledCycle.date + 'T00:00:00Z');
+      d.setUTCDate(d.getUTCDate() + 1);
+      return d.toISOString().slice(0, 10);
+    })();
+    const resetByDim = (rows: typeof scheduledCycle.obligationsByAsset) =>
+      rows.map((r) => ({ ...r, clearedUsd: 0, remainingUsd: r.totalUsd }));
+    const nextScheduled: Cycle = {
+      ...scheduledCycle,
+      id: `CYC-${nextDate}`,
+      date: nextDate,
+      isScheduled: true,
+      status: 'Scheduled',
+      clearedUsd: 0,
+      remainingUsd: scheduledCycle.totalUsd,
+      deliverClearedUsd: 0,
+      deliverRemainingUsd: scheduledCycle.deliverTotalUsd,
+      receiveClearedUsd: 0,
+      receiveRemainingUsd: scheduledCycle.receiveTotalUsd,
+      percentCleared: 0,
+      obligationsByAsset: resetByDim(scheduledCycle.obligationsByAsset),
+      obligationsByCounterparty: resetByDim(scheduledCycle.obligationsByCounterparty),
+    };
+    const remainingCycles = allCycles.filter((c) => c.id !== scheduledCycle.id);
+    onCyclesChange([nextScheduled, cleared, ...remainingCycles]);
+    // Select the just-cleared cycle so the slider is available immediately and
+    // the user can adjust the 60% default up or down. Mark THE cleared cycle
+    // itself as "new" — the dot identifies the freshly-generated history
+    // entry until the user explicitly clicks it.
+    setSelectedCycleId(cleared.id);
+    setNewCycleIds((prev) => {
+      const next = new Set(prev);
+      next.add(cleared.id);
+      return next;
+    });
+    // Flip eligible (Approved) batches to Cleared with VARIED clearing rates
+    // so the Cleared Obligations table doesn't say "100% cleared" on every
+    // card. Each batch gets a deterministic fraction in a wide range; the
+    // average across batches roughly matches the cycle's 60% target so the
+    // numbers are coherent. Per-obligation clearing also varies slightly so
+    // different assets within a batch show different percentages.
+    const targetPct = 60; // matches cleared.percentCleared above
+    const hashId = (id: string): number => {
+      let h = 0;
+      for (let i = 0; i < id.length; i++) h = ((h << 5) - h + id.charCodeAt(i)) | 0;
+      return Math.abs(h);
+    };
+    const batchFraction = (id: string): number => {
+      // 5 buckets distributed around the target. Some batches at 100% (fully
+      // settled), some near target, a few well below — looks like a realistic
+      // mix of post-cycle states.
+      const buckets = [1.0, 0.85, 0.70, 0.55, 0.30];
+      return buckets[hashId(id) % buckets.length];
+    };
+    const sweepObs = (obs: import('../types').Obligation[], batchPct: number): import('../types').Obligation[] => obs.map((o, i) => {
+      // Vary each obligation within a batch by a small deterministic offset
+      // (±10pp), clamped to [0, 100], so per-asset percentages aren't uniform.
+      const offset = ((i % 5) - 2) * 0.1; // -0.2, -0.1, 0, +0.1, +0.2
+      const f = Math.max(0, Math.min(1, batchPct + offset));
+      const clearedAsset = +(o.amountAsset * f);
+      const clearedUsd   = +(o.amountUsd   * f);
+      return {
+        ...o,
+        clearedAsset,
+        remainingAsset: o.amountAsset - clearedAsset,
+        clearedUsd,
+        remainingUsd:   o.amountUsd   - clearedUsd,
+      };
+    });
+    onBatchesChange(
+      batches.map((b) =>
+        b.status === 'Approved'
+          ? (() => {
+              const f = batchFraction(b.id);
+              return {
+                ...b,
+                // Only batches that ended up fully (or near-fully) settled are
+                // marked Cleared. Partial ones stay Approved — they roll over.
+                status: f >= 0.95 ? ('Cleared' as const) : ('Cleared' as const),
+                // (Keeping all settled batches under 'Cleared' so they all show
+                // up in the post-clearing table. Their card-level % already
+                // varies, which is the user-visible signal.)
+                deliverObligations: sweepObs(b.deliverObligations, f),
+                receiveObligations: sweepObs(b.receiveObligations, f),
+              };
+            })()
+          : b,
+      ),
+    );
+    void targetPct;
+  }, [scheduledCycle, allCycles, onCyclesChange, batches, onBatchesChange]);
 
   const mostRecentPastId = pastCycles[0]?.id;
 
@@ -1588,8 +1738,16 @@ export default function CyclesView({ batches, cycles, onCyclesChange, isDemo }: 
                 cycle={scheduledCycle}
                 batches={batches}
                 isSelected={selectedCycle?.id === scheduledCycle.id}
-                onClick={() => setSelectedCycle(scheduledCycle)}
+                onClick={() => { setSelectedCycle(scheduledCycle); clearNewCycleBadge(scheduledCycle.id); }}
               />
+              <button
+                onClick={handleSimulateCycle}
+                title="Clear the upcoming cycle right now, flip approved batches to Cleared, and queue up the next upcoming cycle."
+                className="mt-2 ml-2 inline-flex items-center gap-1.5 text-[10px] font-semibold text-amber-700 dark:text-amber-300 border border-amber-300 dark:border-amber-700 bg-amber-50/60 dark:bg-amber-900/10 hover:bg-amber-100 dark:hover:bg-amber-900/20 rounded-full px-2.5 py-1 transition-colors"
+              >
+                <Timer aria-hidden="true" className="w-3 h-3" strokeWidth={2} />
+                Simulate next cycle
+              </button>
             </>
           )}
 
@@ -1605,18 +1763,15 @@ export default function CyclesView({ batches, cycles, onCyclesChange, isDemo }: 
                 cycle={cycle}
                 isSelected={selectedCycle?.id === cycle.id}
                 isFocused={i === focusedIndex}
-                onClick={() => { setSelectedCycle(cycle); setFocusedIndex(i); }}
+                isNew={newCycleIds.has(cycle.id)}
+                onClick={() => { setSelectedCycle(cycle); setFocusedIndex(i); clearNewCycleBadge(cycle.id); }}
               />
             ))}
-            {visibleCycles < pastCycles.length ? (
+            {visibleCycles < pastCycles.length && (
               <div ref={cycleSentinelRef} className="text-center py-3 text-2xs text-gray-400 dark:text-gray-500">
                 Loading more… ({visibleCycles} of {pastCycles.length})
               </div>
-            ) : pastCycles.length > CYCLE_PAGE ? (
-              <div className="text-center py-3 text-2xs text-gray-400 dark:text-gray-500">
-                End of list — {pastCycles.length} cycles
-              </div>
-            ) : null}
+            )}
           </div>
         </div>
       </div>
@@ -1624,20 +1779,17 @@ export default function CyclesView({ batches, cycles, onCyclesChange, isDemo }: 
       {/* ── RIGHT PANEL: analytics ──────────────────────────────────────────── */}
       <div className="flex-1 overflow-hidden bg-gray-50 dark:bg-[var(--color-1)]">
         <div className="h-full overflow-hidden">
-          {selectedCycle?.isScheduled ? (
-            <TricklingPanel
-              cycle={selectedCycle}
-              batches={batches}
-              onSettle={isDemo ? handleDemoSettle : undefined}
-            />
-          ) : selectedCycle ? (
+          {selectedCycle ? (
             <CycleDetailPanel
               cycle={selectedCycle}
               batches={batches}
+              // Slider is available on any past (non-scheduled) cycle — used
+              // to tweak the cleared % for review / demo purposes. Upcoming
+              // cycles still hide it (nothing's cleared yet).
               onPercentChange={
-                isDemo && selectedCycle.id === mostRecentPastId
-                  ? (pct) => handleDemoPercentChange(selectedCycle.id, pct)
-                  : undefined
+                selectedCycle.isScheduled
+                  ? undefined
+                  : (pct) => handleDemoPercentChange(selectedCycle.id, pct)
               }
             />
           ) : (

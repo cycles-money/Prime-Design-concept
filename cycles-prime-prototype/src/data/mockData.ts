@@ -306,6 +306,12 @@ function makeCycle(dateStr: string, isScheduled: boolean): Cycle {
   const deliverClearedUsd    = Math.round(deliverTotalUsd * (percentCleared / 100));
   const receiveClearedUsd    = clearedUsd - deliverClearedUsd;
 
+  // Synthetic batch / obligation counts. Each batch carries 5–25 obligations
+  // on average; pick a count that loosely tracks the cycle's total volume so
+  // bigger cycles look bigger.
+  const batchCount = randInt(20, 90);
+  const obligationCount = batchCount * randInt(4, 15);
+
   return {
     id: `CYC-${dateStr}`,
     date: dateStr,
@@ -325,6 +331,8 @@ function makeCycle(dateStr: string, isScheduled: boolean): Cycle {
     status: isScheduled ? 'Scheduled' : 'Completed',
     obligationsByAsset,
     obligationsByCounterparty,
+    obligationCount,
+    batchCount,
   };
 }
 

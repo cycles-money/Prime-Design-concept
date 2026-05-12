@@ -2,10 +2,12 @@ import React, {
   useState,
   useRef,
   useCallback,
+  useContext,
   useEffect,
   useLayoutEffect,
   KeyboardEvent,
 } from 'react';
+import { TimeZoneContext } from '../context/TimeZoneContext';
 import { createPortal } from 'react-dom';
 import { mockBatches, mockCycles } from '../data/mockData';
 import type { Batch, BatchStatus, Obligation, SettlementTarget, ActivityEntry, ActivityEventType } from '../types';
@@ -13,7 +15,7 @@ import LinkSettlementModal from './LinkSettlementModal';
 import { fmtUsdCompact, fmtUsdFull, fmtAsset, fmtDate, fmtCutoff, getCountdownParts } from '../utils/formatters';
 import { CryptoIcon } from './CryptoIcon';
 import { CounterpartyAvatar } from './CounterpartyAvatar';
-import { ChevronDown, ChevronRight, Info, Check, Pencil, ArrowUp, ArrowDown, ArrowUpRight, ArrowDownLeft, Upload, AlertCircle, FileText, X, CheckCircle, Plus, Calendar, TrendingUp, History, RefreshCw, Trash2, Filter, Search, Users } from 'lucide-react';
+import { ChevronDown, ChevronRight, Info, Check, Pencil, ArrowUp, ArrowDown, Upload, AlertCircle, FileText, X, CheckCircle, Plus, Calendar, TrendingUp, History, RefreshCw, Trash2, Filter, Search, Users, PanelLeftClose, PanelLeftOpen } from 'lucide-react';
 import NumberFlow, { NumberFlowGroup } from '@number-flow/react';
 
 // ── Lynq eligibility ──────────────────────────────────────────────────────────
@@ -44,22 +46,38 @@ function stripCommas(s: string): string {
 
 // ── Status badge ──────────────────────────────────────────────────────────────
 
-const STATUS_STYLES: Record<BatchStatus, string> = {
-  Draft:
+// Display labels — what users see. The underlying `BatchStatus` 'Pending' is
+// split into two display states based on who needs to act, so users can tell
+// at a glance whether a batch is waiting on them or on the counterparty.
+export type DisplayStatus =
+  | 'Draft'
+  | 'Pending approval'
+  | 'Awaiting counterparty'
+  | 'Approved'
+  | 'Cleared'
+  | 'Rejected'
+  | 'Cancelled'
+  | 'Deleted'
+  | 'Revoked';
+
+const DISPLAY_STATUS_STYLES: Record<DisplayStatus, string> = {
+  'Draft':
     'bg-transparent text-gray-600 dark:text-gray-300 border border-gray-200 dark:border-[var(--border)]',
-  Pending:
+  'Pending approval':
     'bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-400 border border-amber-200 dark:border-amber-800',
-  Approved:
+  'Awaiting counterparty':
+    'bg-gray-50 dark:bg-[var(--surface-3)] text-gray-600 dark:text-gray-300 border border-gray-200 dark:border-[var(--border)]',
+  'Approved':
     'bg-[var(--color-50)] dark:bg-[var(--color-950)]/20 text-[var(--color-700)] dark:text-[var(--color-300)] border border-[var(--color-200)] dark:border-[var(--color-900)]',
-  Cleared:
+  'Cleared':
     'bg-green-50 dark:bg-green-900/20 text-[var(--positive)] border border-green-200 dark:border-green-800',
-  Rejected:
+  'Rejected':
     'bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-400 border border-red-200 dark:border-red-800',
-  Cancelled:
+  'Cancelled':
     'bg-gray-100 dark:bg-[var(--surface-3)] text-gray-500 dark:text-gray-400 border border-gray-200 dark:border-[var(--border)]',
-  Deleted:
+  'Deleted':
     'bg-gray-100 dark:bg-[var(--surface-3)] text-gray-400 dark:text-gray-500 border border-gray-200 dark:border-[var(--border)]',
-  Revoked:
+  'Revoked':
     'bg-orange-50 dark:bg-orange-900/20 text-orange-600 dark:text-orange-400 border border-orange-200 dark:border-orange-800',
 };
 
@@ -70,33 +88,43 @@ function getBatchClearedPct(batch: Batch): number {
   return t > 0 ? Math.round((c / t) * 100) : 0;
 }
 
-// `pct` accepted for backward compatibility but no longer rendered inside
-// the badge — status labels are now words only (per design refresh).
-// Cleared % should be shown as a separate column / value with explicit label.
-function StatusBadge({ status }: { status: BatchStatus; pct?: number }) {
+// Resolve a batch to its user-facing status label. The data status `Pending`
+// splits into "Pending approval" (action is on us) vs "Awaiting counterparty"
+// (waiting on them). A draft response to a received request is also shown as
+// "Pending approval" — it's the user's turn to act on it.
+export function getDisplayStatus(batch: Batch): DisplayStatus {
+  if (batch.status === 'Pending') {
+    return isMyTurn(batch) ? 'Pending approval' : 'Awaiting counterparty';
+  }
+  if (batch.status === 'Draft' && batch.origin === 'requested') {
+    return 'Pending approval';
+  }
+  return batch.status as DisplayStatus;
+}
+
+export function BatchStatusBadge({ batch }: { batch: Batch }) {
+  const label = getDisplayStatus(batch);
   return (
     <span
-      className={`inline-block rounded px-1.5 py-0.5 text-2xs font-medium leading-tight tabular-nums whitespace-nowrap ${STATUS_STYLES[status]}`}
+      className={`inline-block rounded px-1.5 py-0.5 text-2xs font-medium leading-tight tabular-nums whitespace-nowrap ${DISPLAY_STATUS_STYLES[label]}`}
     >
-      {status}
+      {label}
     </span>
   );
 }
 
-// ── Origin marker (Sent / Received) ──────────────────────────────────────────
+// Lower-level badge used for legend chips / step pills where we don't have a
+// full batch context. Accepts either a raw `BatchStatus` or a `DisplayStatus`.
+function statusToDisplay(status: BatchStatus | DisplayStatus): DisplayStatus {
+  return status === 'Pending' ? 'Pending approval' : (status as DisplayStatus);
+}
 
-function OriginPill({ origin }: { origin?: 'created' | 'requested' }) {
-  if (!origin) return null;
-  const isSent = origin === 'created';
-  const Icon = isSent ? ArrowUpRight : ArrowDownLeft;
-  const label = isSent ? 'Sent' : 'Received';
+function StatusBadge({ status }: { status: BatchStatus | DisplayStatus; pct?: number }) {
+  const label = statusToDisplay(status);
   return (
     <span
-      title={isSent ? 'You sent this batch' : 'Sent to you by counterparty'}
-      aria-label={label}
-      className="inline-flex items-center gap-0.5 text-[10px] text-gray-400 dark:text-gray-500 leading-tight whitespace-nowrap"
+      className={`inline-block rounded px-1.5 py-0.5 text-2xs font-medium leading-tight tabular-nums whitespace-nowrap ${DISPLAY_STATUS_STYLES[label]}`}
     >
-      <Icon aria-hidden="true" className="w-2.5 h-2.5" strokeWidth={2} />
       {label}
     </span>
   );
@@ -208,9 +236,9 @@ function StatusSelector({ status, pct, onChange }: StatusSelectorProps) {
         onKeyDown={(e) => { if (e.key === 'Escape') { setOpen(false); setConfirming(null); } }}
         aria-haspopup="listbox"
         aria-expanded={open}
-        className={`inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-2xs font-medium leading-tight transition-[background-color,box-shadow,transform] duration-150 active:scale-[0.97] ${STATUS_STYLES[status]} hover:ring-1 hover:ring-current`}
+        className={`inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-2xs font-medium leading-tight transition-[background-color,box-shadow,transform] duration-150 active:scale-[0.97] ${DISPLAY_STATUS_STYLES[statusToDisplay(status)]} hover:ring-1 hover:ring-current`}
       >
-        {status}
+        {statusToDisplay(status)}
         <ChevronDown aria-hidden="true" className={`w-2.5 h-2.5 opacity-60 transition-transform duration-150 ${open ? 'rotate-180' : ''}`} strokeWidth={2.5} />
       </button>
 
@@ -485,8 +513,6 @@ function CombinedObligationTable({
   const [tableSearch, setTableSearch] = useState('');
   const [assetFilter, setAssetFilter] = useState<Set<string>>(new Set());
   const [showAssetMenu, setShowAssetMenu] = useState(false);
-  const [expandedDeliver, setExpandedDeliver] = useState(true);
-  const [expandedReceive, setExpandedReceive] = useState(true);
   const assetMenuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -523,7 +549,34 @@ function CombinedObligationTable({
   const anyLynqEligible = allObligations.some(isLynqEligible);
   const anyRefNumber = allObligations.some(o => !!o.refNumber);
   const availableAssets = Array.from(new Set(allObligations.map(o => o.asset))).sort();
-  const totalCols = 3 + (anyRefNumber ? 1 : 0) + (showClearing ? 2 : 0) + (anyLynqEligible ? 1 : 0) + 1;
+  // Direction + Asset + Amount + USD + (Ref) + (Cleared) + (Remaining) + (Settle) + Actions
+  const totalCols = 4 + (anyRefNumber ? 1 : 0) + (showClearing ? 2 : 0) + (anyLynqEligible ? 1 : 0) + 1;
+
+  // Build a unified row list. We keep each obligation's original index *within
+  // its direction list* so update / remove handlers (which still take a per-list
+  // index) work unchanged.
+  type Row = { ob: Obligation; dir: 'deliver' | 'receive'; idx: number };
+  const allRows: Row[] = [
+    ...deliverObligations.map((ob, idx) => ({ ob, dir: 'deliver' as const, idx })),
+    ...receiveObligations.map((ob, idx) => ({ ob, dir: 'receive' as const, idx })),
+  ];
+  const visibleRows = allRows.filter(({ ob }) => {
+    if (assetFilter.size > 0 && !assetFilter.has(ob.asset)) return false;
+    if (tableSearch) {
+      const q = tableSearch.toLowerCase();
+      if (!ob.asset.toLowerCase().includes(q) && !(ob.refNumber?.toLowerCase().includes(q))) return false;
+    }
+    return true;
+  });
+
+  const deliverTotalUsd = deliverObligations.reduce((s, o) => s + o.amountUsd, 0);
+  const receiveTotalUsd = receiveObligations.reduce((s, o) => s + o.amountUsd, 0);
+  const deliverClearedUsd = deliverObligations.reduce((s, o) => s + o.clearedUsd, 0);
+  const receiveClearedUsd = receiveObligations.reduce((s, o) => s + o.clearedUsd, 0);
+  const deliverRemainingUsd = deliverObligations.reduce((s, o) => s + o.remainingUsd, 0);
+  const receiveRemainingUsd = receiveObligations.reduce((s, o) => s + o.remainingUsd, 0);
+
+  const filterActive = tableSearch !== '' || assetFilter.size > 0;
 
   return (
     <div className="rounded-2xl overflow-hidden bg-gray-300 dark:bg-[#131417]">
@@ -600,122 +653,94 @@ function CombinedObligationTable({
         </div>
       </div>
 
-      {/* Deliver + Receive cards */}
-      <div className="p-4 space-y-2 bg-gray-300 dark:bg-[#131417]">
-        {(['deliver', 'receive'] as const).map((dir) => {
-          const isDeliver = dir === 'deliver';
-          const obligations = isDeliver ? deliverObligations : receiveObligations;
-          const totalUsd = obligations.reduce((s, o) => s + o.amountUsd, 0);
-          const isExpanded = isDeliver ? expandedDeliver : expandedReceive;
-          const toggleExpanded = () => isDeliver ? setExpandedDeliver(v => !v) : setExpandedReceive(v => !v);
-          const DirIcon = isDeliver ? ArrowUp : ArrowDown;
-          const dirColor = isDeliver ? 'text-[var(--negative)]' : 'text-[var(--positive)]';
-          const dirBg = isDeliver ? 'bg-[var(--negative)]/10' : 'bg-[var(--positive)]/10';
+      {/* Single combined obligations table */}
+      <div className="p-4 bg-gray-300 dark:bg-[#131417]">
+        <div className="border border-gray-200 dark:border-[var(--border)] rounded-xl overflow-hidden">
+          {/* Card header */}
+          <div className="flex items-center gap-3 px-4 py-3 bg-white dark:bg-[var(--surface-1)]">
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-semibold text-gray-800 dark:text-gray-100">Obligations</p>
+              <p className="text-[10px] text-gray-400 dark:text-gray-500 mt-0.5">
+                {allObligations.length} total · {deliverObligations.length} deliver · {receiveObligations.length} receive
+              </p>
+            </div>
+          </div>
 
-          const filteredObligations = obligations.filter(ob => {
-            if (assetFilter.size > 0 && !assetFilter.has(ob.asset)) return false;
-            if (tableSearch) {
-              const q = tableSearch.toLowerCase();
-              if (!ob.asset.toLowerCase().includes(q) && !(ob.refNumber?.toLowerCase().includes(q))) return false;
-            }
-            return true;
-          });
-
-          const sectionClearedUsd = obligations.reduce((s, o) => s + o.clearedUsd, 0);
-          const sectionRemainingUsd = obligations.reduce((s, o) => s + o.remainingUsd, 0);
-
-          return (
-            <div key={dir} className="border border-gray-200 dark:border-[var(--border)] rounded-xl overflow-hidden">
-              {/* Card header */}
-              <button
-                className="w-full flex items-center gap-3 px-4 py-3 bg-white dark:bg-[var(--surface-1)] hover:bg-gray-50 dark:hover:bg-[var(--surface-2)] transition-colors text-left"
-                onClick={toggleExpanded}
-                aria-expanded={isExpanded}
-              >
-                <div className={`w-8 h-8 rounded-full ${dirBg} flex items-center justify-center flex-shrink-0`}>
-                  <DirIcon size={16} className={dirColor} aria-hidden strokeWidth={2} />
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-semibold text-gray-800 dark:text-gray-100">{isDeliver ? 'Deliver' : 'Receive'}</p>
-                  <p className="text-[10px] text-gray-400 dark:text-gray-500 mt-0.5">
-                    {obligations.length} obligation{obligations.length !== 1 ? 's' : ''}{' '}
-                    · {fmtUsdFull(totalUsd)}
-                    {showClearing && sectionClearedUsd > 0 && (
-                      <> · <span className={dirColor}>{fmtUsdFull(sectionClearedUsd)} cleared</span></>
-                    )}
-                  </p>
-                </div>
-                {isExpanded
-                  ? <ChevronDown size={14} className="text-gray-400 dark:text-gray-500 flex-shrink-0" aria-hidden />
-                  : <ChevronRight size={14} className="text-gray-400 dark:text-gray-500 flex-shrink-0" aria-hidden />
-                }
-              </button>
-
-              {/* Detail table */}
-              {isExpanded && (
-                <table className="w-full text-xs whitespace-nowrap bg-white dark:bg-[#0C0D0F]">
-                  <thead>
-                    <tr className="bg-gray-50 dark:bg-[#0C0D0F] text-gray-500 dark:text-gray-400 border-b border-gray-100 dark:border-[var(--border)] text-[10px] uppercase tracking-wide">
-                      <th className="text-left pl-4 pr-2 py-2 font-medium w-20">Asset</th>
-                      <th className="text-right px-2 py-2 font-medium min-w-[12rem]">Amount</th>
-                      <th className="text-right px-2 py-2 font-medium text-gray-400 dark:text-gray-500 min-w-[10rem]">USD</th>
-                      {anyRefNumber && <th className="text-left px-2 py-2 font-medium">Ref</th>}
-                      {showClearing && (
-                        <th className="text-right px-2 py-2 font-medium relative">
-                          <span className="inline-flex items-center justify-end gap-1">
-                            Cleared
-                            <Info
-                              aria-hidden="true"
-                              className="w-3 h-3 text-gray-400 dark:text-gray-500 cursor-default"
-                              strokeWidth={2}
-                              onMouseEnter={() => setShowClearedTip(true)}
-                              onMouseLeave={() => setShowClearedTip(false)}
-                            />
-                            {showClearedTip && (
-                              <div role="tooltip" className="absolute right-0 top-full mt-0.5 w-56 z-50 bg-white dark:bg-[var(--color-1)] border border-gray-200 dark:border-[var(--border)] rounded-lg shadow-lg p-3 text-left normal-case tracking-normal font-normal whitespace-normal pointer-events-none">
-                                <p className="text-xs font-semibold text-gray-700 dark:text-white mb-1">From prior Cycles</p>
-                                <p className="text-2xs text-gray-500 dark:text-gray-300 leading-relaxed">Amount already netted through bilateral Cycles that have run on this batch.</p>
-                              </div>
-                            )}
-                          </span>
-                        </th>
+          {/* Detail table */}
+          <table className="w-full text-xs whitespace-nowrap bg-white dark:bg-[#0C0D0F]">
+            <thead>
+              <tr className="bg-gray-50 dark:bg-[#0C0D0F] text-gray-500 dark:text-gray-400 border-b border-gray-100 dark:border-[var(--border)] text-[10px] uppercase tracking-wide">
+                <th className="text-left pl-4 pr-2 py-2 font-medium w-24">Direction</th>
+                <th className="text-left px-2 py-2 font-medium w-20">Asset</th>
+                <th className="text-right px-2 py-2 font-medium min-w-[12rem]">Amount</th>
+                <th className="text-right px-2 py-2 font-medium text-gray-400 dark:text-gray-500 min-w-[10rem]">USD</th>
+                {anyRefNumber && <th className="text-left px-2 py-2 font-medium">Ref</th>}
+                {showClearing && (
+                  <th className="text-right px-2 py-2 font-medium relative">
+                    <span className="inline-flex items-center justify-end gap-1">
+                      Cleared
+                      <Info
+                        aria-hidden="true"
+                        className="w-3 h-3 text-gray-400 dark:text-gray-500 cursor-default"
+                        strokeWidth={2}
+                        onMouseEnter={() => setShowClearedTip(true)}
+                        onMouseLeave={() => setShowClearedTip(false)}
+                      />
+                      {showClearedTip && (
+                        <div role="tooltip" className="absolute right-0 top-full mt-0.5 w-56 z-50 bg-white dark:bg-[var(--color-1)] border border-gray-200 dark:border-[var(--border)] rounded-lg shadow-lg p-3 text-left normal-case tracking-normal font-normal whitespace-normal pointer-events-none">
+                          <p className="text-xs font-semibold text-gray-700 dark:text-white mb-1">From prior Cycles</p>
+                          <p className="text-2xs text-gray-500 dark:text-gray-300 leading-relaxed">Amount already netted through bilateral Cycles that have run on this batch.</p>
+                        </div>
                       )}
-                      {showClearing && <th className="text-right px-2 py-2 font-medium">Remaining</th>}
-                      {anyLynqEligible && <th className="text-right pr-3 py-2 font-medium w-px">Settle</th>}
-                      <th className="w-0 p-0" />
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {/* Empty state */}
-                    {obligations.length === 0 && newRow?.dir !== dir && (
-                      <tr>
-                        <td colSpan={totalCols} className="text-center py-4 text-gray-400 dark:text-gray-500 text-2xs italic">
-                          No {isDeliver ? 'outgoing' : 'incoming'} obligations
-                        </td>
-                      </tr>
-                    )}
+                    </span>
+                  </th>
+                )}
+                {showClearing && <th className="text-right px-2 py-2 font-medium">Remaining</th>}
+                {anyLynqEligible && <th className="text-right pr-3 py-2 font-medium w-px">Settle</th>}
+                <th className="w-0 p-0" />
+              </tr>
+            </thead>
+            <tbody>
+              {/* Empty state */}
+              {allObligations.length === 0 && !newRow && (
+                <tr>
+                  <td colSpan={totalCols} className="text-center py-6 text-gray-400 dark:text-gray-500 text-2xs italic">
+                    No obligations
+                  </td>
+                </tr>
+              )}
 
-                    {/* No-results */}
-                    {filteredObligations.length === 0 && obligations.length > 0 && (tableSearch || assetFilter.size > 0) && (
-                      <tr>
-                        <td colSpan={totalCols} className="text-center py-4 text-gray-400 dark:text-gray-500 text-2xs italic">
-                          No {isDeliver ? 'deliver' : 'receive'} results{tableSearch ? ` for "${tableSearch}"` : ''}
-                        </td>
-                      </tr>
-                    )}
+              {/* No-results */}
+              {visibleRows.length === 0 && allObligations.length > 0 && filterActive && (
+                <tr>
+                  <td colSpan={totalCols} className="text-center py-4 text-gray-400 dark:text-gray-500 text-2xs italic">
+                    No results{tableSearch ? ` for "${tableSearch}"` : ''}
+                  </td>
+                </tr>
+              )}
 
-                    {/* Obligation rows */}
-                    {filteredObligations.map((ob, idx) => {
-                      const baselineList = baseline ? (isDeliver ? baseline.deliverObligations : baseline.receiveObligations) : undefined;
-                      const baselineOb = baselineList?.[idx];
-                      const amountChanged = baselineOb !== undefined && baselineOb.amountAsset !== ob.amountAsset;
-                      return (
-                      <tr
-                        key={`${dir}-${idx}`}
-                        className={`group hover-row border-b border-gray-50 dark:border-[var(--border)] last:border-b-0 transition-colors ${isDeliver ? 'row-deliver' : 'row-receive'}`}
-                      >
-                        {/* Asset */}
-                        <td className="pl-4 pr-2 py-2 w-20">
+              {/* Obligation rows */}
+              {visibleRows.map(({ ob, dir, idx }) => {
+                const isDeliver = dir === 'deliver';
+                const baselineList = baseline ? (isDeliver ? baseline.deliverObligations : baseline.receiveObligations) : undefined;
+                const baselineOb = baselineList?.[idx];
+                const amountChanged = baselineOb !== undefined && baselineOb.amountAsset !== ob.amountAsset;
+                const DirIcon = isDeliver ? ArrowUp : ArrowDown;
+                return (
+                <tr
+                  key={`${dir}-${idx}`}
+                  className="group hover-row border-b border-gray-50 dark:border-[var(--border)] last:border-b-0 transition-colors"
+                >
+                  {/* Direction */}
+                  <td className="pl-4 pr-2 py-2 w-24">
+                    <span className="inline-flex items-center gap-1 text-[11px] font-medium text-gray-500 dark:text-gray-400">
+                      <DirIcon aria-hidden="true" className="w-3 h-3" strokeWidth={2} />
+                      {isDeliver ? 'Deliver' : 'Receive'}
+                    </span>
+                  </td>
+
+                  {/* Asset */}
+                  <td className="px-2 py-2 w-20">
                           {isEditable ? (
                             <AssetSelect
                               value={ob.asset}
@@ -894,140 +919,176 @@ function CombinedObligationTable({
                       );
                     })}
 
-                    {/* Inline new-row form */}
-                    {newRow?.dir === dir && (
-                      <tr className={`border-t border-gray-100 dark:border-[var(--border)] bg-[var(--color-50)]/40 dark:bg-[var(--color-950)]/10 ${isDeliver ? 'row-deliver' : 'row-receive'}`}>
-                        <td className="pl-4 pr-2 py-2 w-20">
-                          <AssetSelect
-                            value={newRow.asset}
-                            onChange={(asset) => {
-                              const price = ASSET_USD[asset] ?? 1;
-                              const amtAsset = parseFloat(newRow.amountAsset) || 0;
-                              setNewRow({ ...newRow, asset, amountUsd: amtAsset > 0 ? String((amtAsset * price).toFixed(2)) : '' });
-                            }}
-                          />
-                        </td>
-                        <td className="px-2 py-2 text-right tabular-nums">
-                          <input
-                            type="text"
-                            inputMode="decimal"
-                            placeholder="0"
-                            value={formatNumInput(newRow.amountAsset, 8)}
-                            onChange={(e) => {
-                              const formatted = formatNumInput(e.target.value, 8);
-                              const cleaned = stripCommas(formatted);
-                              const price = ASSET_USD[newRow.asset] ?? 1;
-                              const usd = parseFloat(cleaned) > 0 ? String((parseFloat(cleaned) * price).toFixed(2)) : '';
-                              setNewRow({ ...newRow, amountAsset: cleaned, amountUsd: usd });
-                            }}
-                            onKeyDown={(e) => {
-                              if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
-                                e.preventDefault();
-                                const dir = e.key === 'ArrowUp' ? 1 : -1;
-                                const step = e.shiftKey ? 10 : 1;
-                                const cur = parseFloat(stripCommas(newRow.amountAsset || '0')) || 0;
-                                const next = Math.max(0, cur + dir * step);
-                                const price = ASSET_USD[newRow.asset] ?? 1;
-                                const usd = next > 0 ? String((next * price).toFixed(2)) : '';
-                                setNewRow({ ...newRow, amountAsset: String(next), amountUsd: usd });
-                              }
-                            }}
-                            className="w-28 text-right text-[11px] font-medium bg-transparent border border-transparent hover:border-gray-200 dark:hover:border-[var(--border)] focus:border-[var(--color-700)] focus:outline-none rounded px-1.5 py-0.5 text-gray-800 dark:text-gray-200 tabular-nums"
-                            aria-label="Amount"
-                            autoFocus
-                          />
-                        </td>
-                        <td className="px-2 py-2 text-right tabular-nums text-[11px]">
-                          <input
-                            type="text"
-                            inputMode="decimal"
-                            placeholder="0"
-                            value={formatNumInput(newRow.amountUsd, 2)}
-                            onChange={(e) => {
-                              const formatted = formatNumInput(e.target.value, 2);
-                              const cleaned = stripCommas(formatted);
-                              const usd = parseFloat(cleaned);
-                              const price = ASSET_USD[newRow.asset] ?? 1;
-                              const asset = price > 0 && usd > 0 ? String((usd / price).toFixed(8).replace(/\.?0+$/, '')) : '';
-                              setNewRow({ ...newRow, amountUsd: cleaned, amountAsset: asset });
-                            }}
-                            onKeyDown={(e) => {
-                              if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
-                                e.preventDefault();
-                                const dir = e.key === 'ArrowUp' ? 1 : -1;
-                                const step = e.shiftKey ? 100 : 1;
-                                const cur = parseFloat(stripCommas(newRow.amountUsd || '0')) || 0;
-                                const next = Math.max(0, cur + dir * step);
-                                const price = ASSET_USD[newRow.asset] ?? 1;
-                                const asset = price > 0 && next > 0 ? String((next / price).toFixed(8).replace(/\.?0+$/, '')) : '';
-                                setNewRow({ ...newRow, amountUsd: String(next), amountAsset: asset });
-                              }
-                            }}
-                            className="w-28 text-right text-[11px] bg-transparent border border-transparent hover:border-gray-200 dark:hover:border-[var(--border)] focus:border-[var(--color-700)] focus:outline-none rounded px-1.5 py-0.5 text-gray-400 dark:text-gray-500 tabular-nums"
-                            aria-label="USD value"
-                          />
-                        </td>
-                        {anyRefNumber && <td className="px-2 py-2 text-right text-[10px] text-gray-300 dark:text-gray-600">—</td>}
-                        {showClearing && <td className="px-2 py-2 text-right text-[10px] text-gray-300 dark:text-gray-600">—</td>}
-                        {showClearing && <td className="px-2 py-2 text-right text-[10px] text-gray-300 dark:text-gray-600">—</td>}
-                        {anyLynqEligible && <td className="pr-3 py-2" />}
-                        <td className="pl-1 pr-3 py-2">
-                          <div className="flex items-center gap-1 justify-end">
-                            <button
-                              onClick={confirmNewRow}
-                              disabled={!newRow.asset || !(parseFloat(newRow.amountAsset) > 0)}
-                              className="text-[10px] font-semibold bg-[#CDF698] text-gray-900 hover:bg-[var(--color-200)] px-2.5 py-0.5 rounded-full disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-                            >
-                              Add
-                            </button>
-                            <button
-                              onClick={() => setNewRow(null)}
-                              className="text-[10px] text-gray-400 hover:text-gray-600 px-1.5 py-0.5 rounded"
-                            >
-                              ✕
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    )}
-
-                    {/* Bottom add-row */}
-                    {onAddObligation && newRow?.dir !== dir && (
-                      <tr
-                        className="cursor-pointer hover:bg-gray-50 dark:hover:bg-[var(--surface-3)] transition-colors"
-                        onClick={() => setNewRow({ dir, asset: '', amountAsset: '', amountUsd: '' })}
+              {/* Inline new-row form */}
+              {newRow && (
+                <tr className="border-t border-gray-100 dark:border-[var(--border)] bg-[var(--color-50)]/40 dark:bg-[var(--color-950)]/10">
+                  <td className="pl-4 pr-2 py-2 w-24">
+                    <select
+                      value={newRow.dir}
+                      onChange={(e) => setNewRow({ ...newRow, dir: e.target.value as 'deliver' | 'receive' })}
+                      className="text-[11px] bg-transparent border border-gray-200 dark:border-[var(--border)] rounded px-1 py-0.5 text-gray-700 dark:text-gray-200 focus:outline-none focus:border-[var(--color-700)]"
+                      aria-label="Direction"
+                    >
+                      <option value="deliver">Deliver</option>
+                      <option value="receive">Receive</option>
+                    </select>
+                  </td>
+                  <td className="px-2 py-2 w-20">
+                    <AssetSelect
+                      value={newRow.asset}
+                      onChange={(asset) => {
+                        const price = ASSET_USD[asset] ?? 1;
+                        const amtAsset = parseFloat(newRow.amountAsset) || 0;
+                        setNewRow({ ...newRow, asset, amountUsd: amtAsset > 0 ? String((amtAsset * price).toFixed(2)) : '' });
+                      }}
+                    />
+                  </td>
+                  <td className="px-2 py-2 text-right tabular-nums">
+                    <input
+                      type="text"
+                      inputMode="decimal"
+                      placeholder="0"
+                      value={formatNumInput(newRow.amountAsset, 8)}
+                      onChange={(e) => {
+                        const formatted = formatNumInput(e.target.value, 8);
+                        const cleaned = stripCommas(formatted);
+                        const price = ASSET_USD[newRow.asset] ?? 1;
+                        const usd = parseFloat(cleaned) > 0 ? String((parseFloat(cleaned) * price).toFixed(2)) : '';
+                        setNewRow({ ...newRow, amountAsset: cleaned, amountUsd: usd });
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+                          e.preventDefault();
+                          const dir = e.key === 'ArrowUp' ? 1 : -1;
+                          const step = e.shiftKey ? 10 : 1;
+                          const cur = parseFloat(stripCommas(newRow.amountAsset || '0')) || 0;
+                          const next = Math.max(0, cur + dir * step);
+                          const price = ASSET_USD[newRow.asset] ?? 1;
+                          const usd = next > 0 ? String((next * price).toFixed(2)) : '';
+                          setNewRow({ ...newRow, amountAsset: String(next), amountUsd: usd });
+                        }
+                      }}
+                      className="w-28 text-right text-[11px] font-medium bg-transparent border border-transparent hover:border-gray-200 dark:hover:border-[var(--border)] focus:border-[var(--color-700)] focus:outline-none rounded px-1.5 py-0.5 text-gray-800 dark:text-gray-200 tabular-nums"
+                      aria-label="Amount"
+                      autoFocus
+                    />
+                  </td>
+                  <td className="px-2 py-2 text-right tabular-nums text-[11px]">
+                    <input
+                      type="text"
+                      inputMode="decimal"
+                      placeholder="0"
+                      value={formatNumInput(newRow.amountUsd, 2)}
+                      onChange={(e) => {
+                        const formatted = formatNumInput(e.target.value, 2);
+                        const cleaned = stripCommas(formatted);
+                        const usd = parseFloat(cleaned);
+                        const price = ASSET_USD[newRow.asset] ?? 1;
+                        const asset = price > 0 && usd > 0 ? String((usd / price).toFixed(8).replace(/\.?0+$/, '')) : '';
+                        setNewRow({ ...newRow, amountUsd: cleaned, amountAsset: asset });
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+                          e.preventDefault();
+                          const dir = e.key === 'ArrowUp' ? 1 : -1;
+                          const step = e.shiftKey ? 100 : 1;
+                          const cur = parseFloat(stripCommas(newRow.amountUsd || '0')) || 0;
+                          const next = Math.max(0, cur + dir * step);
+                          const price = ASSET_USD[newRow.asset] ?? 1;
+                          const asset = price > 0 && next > 0 ? String((next / price).toFixed(8).replace(/\.?0+$/, '')) : '';
+                          setNewRow({ ...newRow, amountUsd: String(next), amountAsset: asset });
+                        }
+                      }}
+                      className="w-28 text-right text-[11px] bg-transparent border border-transparent hover:border-gray-200 dark:hover:border-[var(--border)] focus:border-[var(--color-700)] focus:outline-none rounded px-1.5 py-0.5 text-gray-400 dark:text-gray-500 tabular-nums"
+                      aria-label="USD value"
+                    />
+                  </td>
+                  {anyRefNumber && <td className="px-2 py-2 text-right text-[10px] text-gray-300 dark:text-gray-600">—</td>}
+                  {showClearing && <td className="px-2 py-2 text-right text-[10px] text-gray-300 dark:text-gray-600">—</td>}
+                  {showClearing && <td className="px-2 py-2 text-right text-[10px] text-gray-300 dark:text-gray-600">—</td>}
+                  {anyLynqEligible && <td className="pr-3 py-2" />}
+                  <td className="pl-1 pr-3 py-2">
+                    <div className="flex items-center gap-1 justify-end">
+                      <button
+                        onClick={confirmNewRow}
+                        disabled={!newRow.asset || !(parseFloat(newRow.amountAsset) > 0)}
+                        className="text-[10px] font-semibold bg-[#CDF698] text-gray-900 hover:bg-[var(--color-200)] px-2.5 py-0.5 rounded-full disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
                       >
-                        <td
-                          colSpan={totalCols}
-                          className="pl-4 pr-3 py-2 text-[10px] font-semibold text-[var(--color-700)] dark:text-[var(--color-300)] hover:underline border-t border-dashed border-gray-100 dark:border-[var(--border)]"
-                        >
-                          + Add new
-                        </td>
-                      </tr>
-                    )}
-
-                    {/* Subtotal footer row (cleared batches) */}
-                    {showClearing && obligations.length > 0 && (
-                      <tr className="border-t border-gray-100 dark:border-[var(--border)] bg-gray-50 dark:bg-[#0C0D0F]">
-                        <td className="pl-4 pr-2 py-2 text-[10px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide" colSpan={3 + (anyRefNumber ? 1 : 0)}>
-                          Subtotal
-                        </td>
-                        <td className={`px-2 py-2 text-right tabular-nums text-xs font-bold ${isDeliver ? 'text-[var(--negative)]' : 'text-[var(--positive)]'}`}>
-                          − {fmtUsdFull(sectionClearedUsd)}
-                        </td>
-                        <td className="pr-3 py-2 text-right tabular-nums text-xs font-bold text-gray-800 dark:text-gray-100">
-                          = {fmtUsdFull(sectionRemainingUsd)}
-                        </td>
-                        {anyLynqEligible && <td className="pr-3 py-2" />}
-                        <td className="w-0 p-0" />
-                      </tr>
-                    )}
-                  </tbody>
-                </table>
+                        Add
+                      </button>
+                      <button
+                        onClick={() => setNewRow(null)}
+                        className="text-[10px] text-gray-400 hover:text-gray-600 px-1.5 py-0.5 rounded"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  </td>
+                </tr>
               )}
-            </div>
-          );
-        })}
+
+              {/* Add new-row triggers — only when the table is editable
+                  (authoring your own Draft, or in Propose-changes mode).
+                  Otherwise adding would silently mutate a batch the
+                  counterparty is reviewing. */}
+              {isEditable && onAddObligation && !newRow && (
+                <tr className="border-t border-dashed border-gray-100 dark:border-[var(--border)]">
+                  <td colSpan={totalCols} className="pl-4 pr-3 py-2">
+                    <div className="flex items-center gap-3">
+                      <button
+                        onClick={() => setNewRow({ dir: 'deliver', asset: '', amountAsset: '', amountUsd: '' })}
+                        className="inline-flex items-center gap-1 text-[10px] font-semibold text-[var(--color-700)] dark:text-[var(--color-300)] hover:underline"
+                      >
+                        <Plus aria-hidden="true" className="w-3 h-3" strokeWidth={2.5} />
+                        Add deliver
+                      </button>
+                      <span className="text-gray-300 dark:text-gray-600">·</span>
+                      <button
+                        onClick={() => setNewRow({ dir: 'receive', asset: '', amountAsset: '', amountUsd: '' })}
+                        className="inline-flex items-center gap-1 text-[10px] font-semibold text-[var(--color-700)] dark:text-[var(--color-300)] hover:underline"
+                      >
+                        <Plus aria-hidden="true" className="w-3 h-3" strokeWidth={2.5} />
+                        Add receive
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              )}
+
+              {/* Subtotal footer rows (cleared batches) */}
+              {showClearing && deliverObligations.length > 0 && (
+                <tr className="border-t border-gray-100 dark:border-[var(--border)] bg-gray-50 dark:bg-[#0C0D0F]">
+                  <td className="pl-4 pr-2 py-2 text-[10px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide" colSpan={4 + (anyRefNumber ? 1 : 0)}>
+                    Deliver subtotal
+                  </td>
+                  <td className="px-2 py-2 text-right tabular-nums text-xs font-bold text-[var(--negative)]">
+                    − {fmtUsdFull(deliverClearedUsd)}
+                  </td>
+                  <td className="pr-3 py-2 text-right tabular-nums text-xs font-bold text-gray-800 dark:text-gray-100">
+                    = {fmtUsdFull(deliverRemainingUsd)}
+                  </td>
+                  {anyLynqEligible && <td className="pr-3 py-2" />}
+                  <td className="w-0 p-0" />
+                </tr>
+              )}
+              {showClearing && receiveObligations.length > 0 && (
+                <tr className="bg-gray-50 dark:bg-[#0C0D0F]">
+                  <td className="pl-4 pr-2 py-2 text-[10px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide" colSpan={4 + (anyRefNumber ? 1 : 0)}>
+                    Receive subtotal
+                  </td>
+                  <td className="px-2 py-2 text-right tabular-nums text-xs font-bold text-[var(--positive)]">
+                    − {fmtUsdFull(receiveClearedUsd)}
+                  </td>
+                  <td className="pr-3 py-2 text-right tabular-nums text-xs font-bold text-gray-800 dark:text-gray-100">
+                    = {fmtUsdFull(receiveRemainingUsd)}
+                  </td>
+                  {anyLynqEligible && <td className="pr-3 py-2" />}
+                  <td className="w-0 p-0" />
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
       </div>
     </div>
   );
@@ -1135,6 +1196,7 @@ function ActivityCard({ entries }: { entries: ActivityEntry[] }) {
 }
 
 function BatchDetail({ batch, onUpdate, onDelete, isDemo }: BatchDetailProps) {
+  const tz = useContext(TimeZoneContext);
   const [showGuide, setShowGuide] = useState(false);
   const [settlementTarget, setSettlementTarget] = useState<SettlementTarget | null>(null);
   const [confirmingReject, setConfirmingReject] = useState(false);
@@ -1153,6 +1215,12 @@ function BatchDetail({ batch, onUpdate, onDelete, isDemo }: BatchDetailProps) {
 
   const myTurn = isMyTurn(batch);
   const hasAmendment = !!batch.amendmentBaseline;
+  // A Draft batch you received (origin='requested') is shown as "Pending
+  // approval" too — surface the same Reject / Propose-changes / Approve set so
+  // every "Pending approval" batch has a consistent action row.
+  const awaitingMyApproval =
+    (batch.status === 'Pending' && myTurn) ||
+    (batch.status === 'Draft' && batch.origin === 'requested');
 
   const enterAmendMode = () => {
     setAmendSnapshot({
@@ -1275,9 +1343,14 @@ function BatchDetail({ batch, onUpdate, onDelete, isDemo }: BatchDetailProps) {
   };
 
   // Determine the primary CTA based on current status + origin + amendment state.
+  // A Draft batch you *received* (origin='requested') displays as "Pending
+  // approval" — surface the same Approve action so the label matches the
+  // available action.
   const primaryCta =
     batch.status === 'Draft' && batch.origin === 'created'
       ? { label: 'Send to counterparty', icon: <ChevronRight aria-hidden="true" className="w-4 h-4" strokeWidth={2.5} />, action: () => onUpdate(transitionStatus(batch, 'Pending', 'Sent to counterparty')), prominent: false }
+    : batch.status === 'Draft' && batch.origin === 'requested'
+      ? { label: 'Approve batch', icon: <Check aria-hidden="true" className="w-4 h-4" strokeWidth={2.5} />, action: () => onUpdate(transitionStatus({ ...batch, awaiting: undefined }, 'Approved', 'Approved batch')), prominent: true }
     : batch.status === 'Pending' && myTurn && hasAmendment
       ? { label: 'Accept changes', icon: <Check aria-hidden="true" className="w-4 h-4" strokeWidth={2.5} />, action: acceptAmendment, prominent: true }
     : batch.status === 'Pending' && myTurn && !hasAmendment
@@ -1316,22 +1389,9 @@ function BatchDetail({ batch, onUpdate, onDelete, isDemo }: BatchDetailProps) {
               </span>
             </div>
             <div className="flex items-center gap-1.5 mt-0.5 text-2xs text-gray-400 dark:text-gray-500">
-              {batch.origin && (
-                <>
-                  <span className="inline-flex items-center gap-0.5">
-                    {batch.origin === 'created' ? (
-                      <ArrowUpRight aria-hidden="true" className="w-2.5 h-2.5" strokeWidth={2} />
-                    ) : (
-                      <ArrowDownLeft aria-hidden="true" className="w-2.5 h-2.5" strokeWidth={2} />
-                    )}
-                    {batch.origin === 'created' ? 'Sent' : 'Received'}
-                  </span>
-                  <span className="text-gray-300 dark:text-gray-600">·</span>
-                </>
-              )}
               <span>{batch.id}</span>
               <span className="text-gray-300 dark:text-gray-600">·</span>
-              <span>Cutoff {fmtCutoff(batch.cutoffTime)}</span>
+              <span>Cutoff {fmtCutoff(batch.cutoffTime, tz)}</span>
             </div>
           </div>
 
@@ -1348,15 +1408,16 @@ function BatchDetail({ batch, onUpdate, onDelete, isDemo }: BatchDetailProps) {
                 Simulate counterparty edit
               </button>
             )}
-            {/* Awaiting pill — when other party has the ball */}
-            {batch.status === 'Pending' && !myTurn && !inAmendMode && (
-              <span className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800">
-                <span className="w-1.5 h-1.5 rounded-full bg-amber-500 dark:bg-amber-400 animate-pulse flex-shrink-0" />
-                {hasAmendment ? 'Awaiting their review of your changes' : 'Awaiting counterparty review'}
+            {/* Awaiting state is already communicated by the phase stepper +
+                status badge — no separate pill needed. When an amendment has
+                been sent, surface that specific context inline instead. */}
+            {batch.status === 'Pending' && !myTurn && !inAmendMode && hasAmendment && (
+              <span className="text-2xs text-amber-700 dark:text-amber-400 italic">
+                Awaiting their review of your changes
               </span>
             )}
-            {/* Reject — when it's our turn on a Pending batch */}
-            {batch.status === 'Pending' && myTurn && !inAmendMode && (
+            {/* Reject — whenever the batch is awaiting our approval */}
+            {awaitingMyApproval && !inAmendMode && (
               confirmingReject ? (
                 <div className="flex items-center gap-1.5">
                   <span className="text-xs text-red-600 dark:text-red-400 font-medium whitespace-nowrap">Reject batch?</span>
@@ -1382,8 +1443,8 @@ function BatchDetail({ batch, onUpdate, onDelete, isDemo }: BatchDetailProps) {
                 </button>
               )
             )}
-            {/* Propose changes / Counter — when it's our turn on a Pending batch and we're not already amending */}
-            {batch.status === 'Pending' && myTurn && !inAmendMode && (
+            {/* Propose changes / Counter — whenever the batch is awaiting our approval and we're not already amending */}
+            {awaitingMyApproval && !inAmendMode && (
               <button
                 onClick={enterAmendMode}
                 className="h-8 flex items-center gap-1 px-3 rounded-full text-xs font-semibold text-[var(--color-700)] dark:text-[var(--color-300)] border border-[var(--color-300)] dark:border-[var(--color-700)] hover:bg-[var(--color-50)] dark:hover:bg-[var(--color-50)] transition-colors duration-150 active:scale-[0.97] whitespace-nowrap"
@@ -1471,17 +1532,20 @@ function BatchDetail({ batch, onUpdate, onDelete, isDemo }: BatchDetailProps) {
         {/* ── Phase stepper card ── */}
         {(() => {
           const isSender = batch.origin !== 'requested';
-          const steps: { label: string; statuses: BatchStatus[] }[] = isSender
+          // The "Pending" data state is shown as different labels depending on
+          // who's looking: sender sees "Awaiting counterparty", recipient sees
+          // "Pending approval" (it's on them to act).
+          const steps: { label: DisplayStatus; statuses: BatchStatus[] }[] = isSender
             ? [
-                { label: 'Draft',       statuses: ['Draft'] },
-                { label: 'Pending',     statuses: ['Pending'] },
-                { label: 'Approved', statuses: ['Approved'] },
-                { label: 'Cleared',     statuses: ['Cleared'] },
+                { label: 'Draft',                 statuses: ['Draft'] },
+                { label: 'Awaiting counterparty', statuses: ['Pending'] },
+                { label: 'Approved',              statuses: ['Approved'] },
+                { label: 'Cleared',               statuses: ['Cleared'] },
               ]
             : [
-                { label: 'Pending',     statuses: ['Pending', 'Draft'] },
-                { label: 'Approved', statuses: ['Approved'] },
-                { label: 'Cleared',     statuses: ['Cleared'] },
+                { label: 'Pending approval',      statuses: ['Pending', 'Draft'] },
+                { label: 'Approved',              statuses: ['Approved'] },
+                { label: 'Cleared',               statuses: ['Cleared'] },
               ];
           const currentIdx = steps.findIndex(s => s.statuses.includes(batch.status));
           return (
@@ -1495,7 +1559,7 @@ function BatchDetail({ batch, onUpdate, onDelete, isDemo }: BatchDetailProps) {
                       <ChevronRight aria-hidden="true" className="w-3 h-3 text-gray-200 dark:text-gray-700 flex-shrink-0" strokeWidth={2.5} />
                     )}
                     {isCurrent ? (
-                      <StatusBadge status={batch.status} pct={getBatchClearedPct(batch)} />
+                      <BatchStatusBadge batch={batch} />
                     ) : (
                       <span className={`inline-flex items-center gap-1 text-[10px] font-medium whitespace-nowrap ${
                         isDone ? 'text-[var(--positive)]' : 'text-gray-300 dark:text-gray-600'
@@ -1551,9 +1615,12 @@ function BatchDetail({ batch, onUpdate, onDelete, isDemo }: BatchDetailProps) {
 
         {(() => {
           const onAdd = (ob: Obligation, dir: 'deliver' | 'receive') => {
+            // Adds are only allowed while authoring a Draft we own, or while in
+            // Propose-changes (amend) mode — preserve the batch's current
+            // status instead of unconditionally flipping back to Draft, so
+            // additions made during amend mode stay part of the amendment.
             const updated: Batch = {
               ...batch,
-              status: 'Draft',
               deliverObligations: dir === 'deliver' ? [...batch.deliverObligations, ob] : batch.deliverObligations,
               receiveObligations: dir === 'receive' ? [...batch.receiveObligations, ob] : batch.receiveObligations,
               totalUsd: batch.totalUsd + ob.amountUsd,
@@ -1570,50 +1637,12 @@ function BatchDetail({ batch, onUpdate, onDelete, isDemo }: BatchDetailProps) {
             const newTotal = [...deliver, ...receive].reduce((s, o) => s + o.amountUsd, 0);
             onUpdate({ ...batch, deliverObligations: deliver, receiveObligations: receive, totalUsd: newTotal });
           };
-          // Variant A (?layout=split): two separate tables, Deliver above Receive.
-          // Variant B (default): single combined table with a Direction column.
-          // Internal review only — do not surface as a user-facing toggle.
-          const useSplit = typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('layout') === 'split';
           // In amend mode (or for a Draft we still own), inputs are editable.
           // Otherwise rows render read-only (matches the new amend-via-CTA flow).
           const isEditable = inAmendMode || (batch.status === 'Draft' && batch.origin === 'created');
           // Show diff captions only when the awaiting party is reviewing —
           // never while they're editing their own counter.
           const baseline = hasAmendment && myTurn && !inAmendMode ? batch.amendmentBaseline : undefined;
-          if (useSplit) {
-            return (
-              <div className="space-y-3">
-                <CombinedObligationTable
-                  deliverObligations={batch.deliverObligations}
-                  receiveObligations={[]}
-                  onUpdateDeliver={updateDeliver}
-                  onUpdateReceive={updateReceive}
-                  onMoveObligation={moveObligation}
-                  batchStatus={batch.status}
-                  counterpartyName={batch.counterpartyName}
-                  onSettleWithLynq={handleSettleWithLynq}
-                  onAddObligation={(ob) => onAdd(ob, 'deliver')}
-                  onRemoveObligation={onRemove}
-                  isEditable={isEditable}
-                  baseline={baseline ? { deliverObligations: baseline.deliverObligations, receiveObligations: [] } : undefined}
-                />
-                <CombinedObligationTable
-                  deliverObligations={[]}
-                  receiveObligations={batch.receiveObligations}
-                  onUpdateDeliver={updateDeliver}
-                  onUpdateReceive={updateReceive}
-                  onMoveObligation={moveObligation}
-                  batchStatus={batch.status}
-                  counterpartyName={batch.counterpartyName}
-                  onSettleWithLynq={handleSettleWithLynq}
-                  onAddObligation={(ob) => onAdd(ob, 'receive')}
-                  onRemoveObligation={onRemove}
-                  isEditable={isEditable}
-                  baseline={baseline ? { deliverObligations: [], receiveObligations: baseline.receiveObligations } : undefined}
-                />
-              </div>
-            );
-          }
           return (
             <CombinedObligationTable
               deliverObligations={batch.deliverObligations}
@@ -1927,7 +1956,11 @@ function parseInput(raw: string): ParseResult {
 }
 
 function buildBatch(parsed: ParsedBatch): Batch {
-  const id = parsed.id ?? `BATCH-IMP-${Date.now().toString(36).toUpperCase().slice(-6)}`;
+  // Multiple imported batches are constructed in the same millisecond, so
+  // Date.now() alone collides. Append a 4-char random suffix to keep IDs
+  // unique within a single import.
+  const rand = Math.floor(Math.random() * 0x10000).toString(36).toUpperCase().padStart(4, '0');
+  const id = parsed.id ?? `BATCH-IMP-${Date.now().toString(36).toUpperCase().slice(-4)}-${rand}`;
   const toObligation = (o: ParsedObligation) => ({
     asset: o.asset,
     amountAsset: o.amountAsset,
@@ -2077,67 +2110,89 @@ interface ImportModalProps {
   onConfirm: (batches: Batch[]) => void;
   onClose: () => void;
   existingCounterparties: string[];
+  /** If files were already chosen in the New-batch modal, they're handed in
+   *  here so we can skip the upload step and land straight on the review. */
+  initialFiles?: File[];
 }
 
-type ImportStep = 'upload' | 'review' | 'complete';
 type SubmitMode = 'draft' | 'direct';
 
-// Merged "validate" into "review" — one screen for issue summary + inline edits + final action.
-const STEP_ORDER: ImportStep[] = ['upload', 'review', 'complete'];
-const STEP_LABELS: Record<ImportStep, string> = {
-  upload: 'Upload',
-  review: 'Review & validate',
-  complete: 'Done',
-};
-
-function ImportModal({ onConfirm, onClose, existingCounterparties }: ImportModalProps) {
-  const [step, setStep] = useState<ImportStep>('upload');
+function ImportModal({ onConfirm, onClose, existingCounterparties, initialFiles }: ImportModalProps) {
+  // Single-step "review & validate" — per the transcript, the upload step lives
+  // upstream in the New-batch modal's drop zone. ImportModal is only mounted
+  // once files have been chosen, so we always start on the review screen.
   const [raw, setRaw] = useState('');
-  const [fileName, setFileName] = useState<string | null>(null);
-  const [fileSize, setFileSize] = useState<number>(0);
+  const [fileNames, setFileNames] = useState<string[]>([]);
   const [parseResult, setParseResult] = useState<ParseResult | null>(null);
   const [parseError, setParseError] = useState('');
-  const [submitMode, setSubmitMode] = useState<SubmitMode>('draft');
-  const [importedBatches, setImportedBatches] = useState<Batch[]>([]);
   const [selectedBatchIdx, setSelectedBatchIdx] = useState<number>(0);
-  const fileRef = useRef<HTMLInputElement>(null);
-  const [isDragging, setIsDragging] = useState(false);
+  // All-good review: which batch cards are currently expanded to show their
+  // obligations inline. Default = all collapsed (per Benji: minimalist).
+  const [expandedReviewBatches, setExpandedReviewBatches] = useState<Set<number>>(new Set());
+  const toggleReviewBatch = (i: number) => {
+    setExpandedReviewBatches((prev) => {
+      const next = new Set(prev);
+      if (next.has(i)) next.delete(i); else next.add(i);
+      return next;
+    });
+  };
 
-  const handleKey = (e: React.KeyboardEvent) => { if (e.key === 'Escape' && step !== 'complete') onClose(); };
+  const handleKey = (e: React.KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
 
-  const processFile = (file: File) => {
-    if (!/\.(csv|txt)$/i.test(file.name)) {
+  // Read one or more dropped files and concatenate their contents. The parser
+  // treats blank lines as separators between batches, so joining works even
+  // when each CSV has its own header row.
+  const processFiles = (files: FileList | File[]) => {
+    const arr = Array.from(files);
+    if (arr.length === 0) return;
+    const bad = arr.find((f) => !/\.(csv|txt)$/i.test(f.name));
+    if (bad) {
       setParseError('Only .csv or .txt files are supported.');
       return;
     }
-    setFileName(file.name);
-    setFileSize(file.size);
-    const reader = new FileReader();
-    reader.onload = (ev) => { setRaw(ev.target?.result as string ?? ''); setParseError(''); };
-    reader.readAsText(file);
+    Promise.all(
+      arr.map(
+        (f) =>
+          new Promise<string>((resolve) => {
+            const reader = new FileReader();
+            reader.onload = (ev) => resolve((ev.target?.result as string) ?? '');
+            reader.readAsText(f);
+          }),
+      ),
+    ).then((texts) => {
+      setFileNames(arr.map((f) => f.name));
+      setRaw(texts.join('\n\n'));
+      setParseError('');
+    });
   };
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    processFile(file);
-    e.target.value = '';
-  };
+  // Read the handed-in files once on mount.
+  useEffect(() => {
+    if (!initialFiles || initialFiles.length === 0) return;
+    processFiles(initialFiles);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-  const handleDrop = (e: React.DragEvent) => {
-    e.preventDefault();
-    setIsDragging(false);
-    const file = e.dataTransfer.files?.[0];
-    if (!file) return;
-    processFile(file);
-  };
+  // ImportModal has no drop zone of its own, so any file dropped on it would
+  // otherwise trigger the browser's default "navigate to file" — which looks
+  // like a black screen as the page is replaced by raw CSV text. Swallow.
+  useEffect(() => {
+    const swallow = (e: DragEvent) => { e.preventDefault(); };
+    window.addEventListener('dragover', swallow);
+    window.addEventListener('drop', swallow);
+    return () => {
+      window.removeEventListener('dragover', swallow);
+      window.removeEventListener('drop', swallow);
+    };
+  }, []);
 
-  const clearFile = () => {
-    setFileName(null);
-    setFileSize(0);
-    setRaw('');
-    setParseError('');
-  };
+  // Validate as soon as the FileReader resolves.
+  useEffect(() => {
+    if (raw.trim() && !parseResult) {
+      runValidation();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [raw]);
 
   const runValidation = (): boolean => {
     if (!raw.trim()) return false;
@@ -2152,28 +2207,14 @@ function ImportModal({ onConfirm, onClose, existingCounterparties }: ImportModal
     return true;
   };
 
-  const goNext = () => {
-    if (step === 'upload') {
-      if (runValidation()) {
-        setStep('review');
-        setSelectedBatchIdx(0);
-      }
-    } else if (step === 'review') {
-      finalize();
-    }
-  };
-
-  const goBack = () => {
-    if (step === 'review') setStep('upload');
-  };
-
-  const finalize = (mode: SubmitMode = submitMode) => {
+  // Build and hand the parsed batches back to the parent. The parent closes the
+  // modal — there's no in-modal success screen anymore.
+  const finalize = (mode: SubmitMode) => {
     if (!parseResult) return;
     const isDirect = mode === 'direct';
     const batches = parseResult.batches.map((b) => {
       const base = buildBatch(b);
       if (!isDirect) return base;
-      // Sent directly: mark as Pending awaiting recipient + log the "Sent" event.
       const sentEvent: ActivityEntry = {
         id: `${base.id}-sent`,
         timestamp: new Date().toISOString(),
@@ -2188,17 +2229,34 @@ function ImportModal({ onConfirm, onClose, existingCounterparties }: ImportModal
         activity: [sentEvent, ...(base.activity ?? [])],
       };
     });
-    setImportedBatches(batches);
-    setStep('complete');
+    onConfirm(batches);
   };
 
-  const handleDone = () => {
-    onConfirm(importedBatches);
+  // Per-batch "Flip directions" — flips every obligation's deliver↔receive
+  // within a single batch (resolving any ambiguous_direction issues along the
+  // way). Scoped to one batch per the transcript so users can fix one mis-
+  // imported batch without touching the others.
+  const flipBatchDirections = (batchIdx: number) => {
+    setParseResult((prev) => {
+      if (!prev) return prev;
+      const batches = prev.batches.map((b, i) =>
+        i !== batchIdx
+          ? b
+          : {
+              ...b,
+              obligations: b.obligations.map((o) => ({
+                ...o,
+                direction: (o.direction === 'deliver' ? 'receive' : 'deliver') as ParsedObligation['direction'],
+                issues: (o.issues ?? []).filter((x) => x !== 'ambiguous_direction'),
+              })),
+            },
+      );
+      return { ...prev, batches };
+    });
   };
 
   const totalObl = parseResult?.batches.reduce((s, b) => s + b.obligations.length, 0) ?? 0;
   const n = parseResult?.batches.length ?? 0;
-  const fileSizeKb = fileSize > 0 ? (fileSize / 1024).toFixed(1) : null;
 
   // Aggregate issue counts across the parsed result.
   const issueCounts = (() => {
@@ -2236,12 +2294,7 @@ function ImportModal({ onConfirm, onClose, existingCounterparties }: ImportModal
     });
   };
 
-  const currentStepIdx = STEP_ORDER.indexOf(step);
-  const canGoNext = (() => {
-    if (step === 'upload') return raw.trim().length > 0;
-    if (step === 'review') return !hasUnresolvedIssues;
-    return false;
-  })();
+  const canSubmit = !!parseResult && !hasUnresolvedIssues;
 
   const selectedBatch = parseResult?.batches[selectedBatchIdx] ?? null;
 
@@ -2253,8 +2306,8 @@ function ImportModal({ onConfirm, onClose, existingCounterparties }: ImportModal
       aria-labelledby="import-modal-title"
       onKeyDown={handleKey}
     >
-      {/* Header */}
-      <div className="flex-shrink-0 flex items-center justify-between px-6 py-3 bg-white dark:bg-black border-b border-gray-200 dark:border-[var(--border)] h-12">
+      {/* Header — title only. Exit lives in the footer Cancel button. */}
+      <div className="flex-shrink-0 flex items-center gap-3 px-6 py-3 bg-white dark:bg-black border-b border-gray-200 dark:border-[var(--border)] h-12">
         <div className="flex items-center gap-2.5">
           <div className="w-6 h-6 rounded bg-[var(--color-50)] dark:bg-[var(--color-950)]/20 flex items-center justify-center">
             <Upload aria-hidden="true" className="w-3.5 h-3.5 text-[var(--color-700)] dark:text-[var(--color-300)]" strokeWidth={2} />
@@ -2262,139 +2315,132 @@ function ImportModal({ onConfirm, onClose, existingCounterparties }: ImportModal
           <span id="import-modal-title" className="text-sm font-semibold text-gray-900 dark:text-gray-100">
             Import obligations
           </span>
-          {fileName && step !== 'upload' && (
-            <span className="text-2xs text-gray-400 dark:text-gray-500 ml-2 truncate max-w-[280px]">{fileName}</span>
+          {fileNames.length > 0 && (
+            <span className="text-2xs text-gray-400 dark:text-gray-500 ml-2 truncate max-w-[280px]">
+              {fileNames.length === 1 ? fileNames[0] : `${fileNames.length} files`}
+            </span>
           )}
         </div>
-        <button
-          onClick={onClose}
-          className="text-gray-500 hover:text-gray-700 dark:hover:text-gray-200 transition-colors rounded p-1"
-          aria-label="Close"
-        >
-          <X aria-hidden="true" className="w-4 h-4" strokeWidth={2} />
-        </button>
-      </div>
-
-      {/* Stepper */}
-      <div className="flex-shrink-0 px-6 py-2.5 bg-white dark:bg-[var(--color-2)] border-b border-gray-200 dark:border-[var(--border)]">
-        <ol className="flex items-center gap-1 max-w-[520px] mx-auto">
-          {STEP_ORDER.map((s, i) => {
-            const isDone = i < currentStepIdx;
-            const isCurrent = i === currentStepIdx;
-            return (
-              <React.Fragment key={s}>
-                {i > 0 && (
-                  <span className={`flex-1 h-px ${isDone ? 'bg-[var(--positive)]' : 'bg-gray-200 dark:bg-gray-600'}`} />
-                )}
-                <li className="flex items-center gap-1.5">
-                  <span
-                    className={`w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0 text-[10px] font-semibold tabular-nums ${
-                      isDone ? 'bg-[var(--positive)] text-white' :
-                      isCurrent ? 'bg-[var(--color-700)] text-white dark:bg-[var(--color-300)] dark:text-gray-900' :
-                      'bg-gray-200 dark:bg-gray-600 text-gray-400 dark:text-gray-500'
-                    }`}
-                  >
-                    {isDone ? <Check aria-hidden="true" className="w-3 h-3" strokeWidth={3} /> : i + 1}
-                  </span>
-                  <span className={`text-[11px] font-medium whitespace-nowrap ${
-                    isCurrent ? 'text-gray-900 dark:text-gray-100' :
-                    isDone ? 'text-[var(--positive)]' :
-                    'text-gray-400 dark:text-gray-500'
-                  }`}>
-                    {STEP_LABELS[s]}
-                  </span>
-                </li>
-              </React.Fragment>
-            );
-          })}
-        </ol>
       </div>
 
       {/* Body — fills remaining viewport */}
       <div className="flex-1 overflow-hidden flex flex-col">
-        {step === 'upload' && (
-          <div className="flex-1 overflow-y-auto flex items-center justify-center px-6 py-8">
-            <div className="w-full max-w-2xl space-y-4">
-              <div className="text-center mb-6">
-                <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Upload your obligations file</h2>
-                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                  We'll parse it, group by counterparty, and let you fix any issues before importing.
-                </p>
+        {parseError && (
+          <div className="flex-shrink-0 mx-6 mt-4 flex items-start gap-2 px-3 py-2.5 bg-[var(--negative)]/10 border border-[var(--negative)] rounded-lg">
+            <AlertCircle aria-hidden="true" className="w-4 h-4 text-[var(--negative)] flex-shrink-0 mt-0.5" strokeWidth={2} />
+            <p className="text-xs text-[var(--negative)]">{parseError}</p>
+          </div>
+        )}
+
+        {parseResult && selectedBatch && !hasUnresolvedIssues && (
+          /* All-good review — minimal screen: just a list of imported batches.
+             No per-row reconciliation table. CTA lives in the footer. */
+          <div className="flex-1 overflow-y-auto px-6 py-6">
+            <div className="max-w-2xl mx-auto space-y-4">
+              <div className="flex items-center gap-2.5">
+                <CheckCircle aria-hidden="true" className="w-5 h-5 text-[var(--positive)] flex-shrink-0" strokeWidth={2} />
+                <div>
+                  <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">Ready to import</p>
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                    {n} batch{n !== 1 ? 'es' : ''} · {totalObl} obligation{totalObl !== 1 ? 's' : ''}. Everything parsed cleanly.
+                  </p>
+                </div>
               </div>
 
-              <input ref={fileRef} type="file" accept=".csv,.txt" className="sr-only" aria-label="Upload CSV or text file" onChange={handleFileChange} />
-              {fileName ? (
-                <div className="flex items-center justify-between gap-3 px-5 py-4 bg-[var(--positive)]/10 border border-[var(--positive)] rounded-xl">
-                  <div className="flex items-center gap-3">
-                    <CheckCircle aria-hidden="true" className="w-5 h-5 text-[var(--positive)] flex-shrink-0" strokeWidth={2} />
-                    <div>
-                      <p className="text-sm font-semibold text-gray-800 dark:text-gray-200">{fileName}</p>
-                      <p className="text-2xs text-gray-500 dark:text-gray-400 mt-0.5">{fileSizeKb} KB · file accepted</p>
-                    </div>
-                  </div>
-                  <button
-                    onClick={clearFile}
-                    className="text-xs text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 transition-colors px-3 py-1.5 rounded-full border border-gray-300 dark:border-[var(--border)]"
-                  >
-                    Replace
-                  </button>
-                </div>
-              ) : (
-                <div
-                  onClick={() => fileRef.current?.click()}
-                  onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); fileRef.current?.click(); } }}
-                  onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
-                  onDragEnter={(e) => { e.preventDefault(); setIsDragging(true); }}
-                  onDragLeave={(e) => {
-                    if (e.currentTarget.contains(e.relatedTarget as Node)) return;
-                    setIsDragging(false);
-                  }}
-                  onDrop={handleDrop}
-                  role="button"
-                  tabIndex={0}
-                  aria-label="Upload a .csv or .txt file by drag and drop or click to browse"
-                  className={`w-full rounded-2xl border-2 border-dashed transition-colors cursor-pointer px-8 py-16 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[oklch(0.683_0.106_127.892_/_0.45)] ${
-                    isDragging
-                      ? 'border-[var(--color-700)] bg-[var(--color-50)] dark:bg-[var(--color-950)]/30'
-                      : 'border-gray-300 dark:border-[var(--border)] bg-white dark:bg-[var(--color-2)] hover:border-[var(--color-700)] hover:bg-[var(--color-50)] dark:hover:bg-[var(--color-950)]/20'
-                  }`}
-                >
-                  <div className="flex flex-col items-center gap-4 pointer-events-none">
-                    <div className={`w-16 h-16 rounded-full flex items-center justify-center transition-colors ${
-                      isDragging
-                        ? 'bg-[var(--color-700)] text-white dark:bg-[var(--color-300)] dark:text-gray-900'
-                        : 'bg-gray-100 dark:bg-[var(--surface-2)] text-gray-500 dark:text-gray-400'
-                    }`}>
-                      <Upload aria-hidden="true" className="w-7 h-7" strokeWidth={1.75} />
-                    </div>
-                    <div className="text-center">
-                      <p className="text-base font-semibold text-gray-700 dark:text-gray-200">
-                        {isDragging ? 'Drop file to upload' : 'Drag and drop, or click to browse'}
-                      </p>
-                      <p className="text-xs text-gray-400 dark:text-gray-500 mt-2">
-                        Supports .csv or .txt
-                      </p>
-                      <p className="text-2xs text-gray-400 dark:text-gray-500 mt-0.5">
-                        Position CSV · Batch Export CSV · Natural-language statements
-                      </p>
-                    </div>
-                  </div>
-                </div>
-              )}
+              {/* Per-batch summary list. Each row is expandable so the user
+                  can see the batch's obligations inline (kept in context with
+                  their counterparty) — defaults to collapsed for the
+                  minimalist all-good state Benji asked for. */}
+              <section>
+                <p className="text-[10px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wide mb-1.5">
+                  Batches ({n})
+                </p>
+                <div className="rounded-xl border border-gray-200 dark:border-[var(--border)] bg-white dark:bg-[var(--color-2)] divide-y divide-gray-100 dark:divide-[var(--border)] overflow-hidden">
+                  {parseResult.batches.map((b, i) => {
+                    const dc = b.obligations.filter((o) => o.direction === 'deliver').length;
+                    const rc = b.obligations.filter((o) => o.direction === 'receive').length;
+                    const usd = b.obligations.reduce((s, o) => s + o.amountUsd, 0);
+                    const isExpanded = expandedReviewBatches.has(i);
+                    return (
+                      <div key={i}>
+                        {/* Header row — clickable to expand/collapse. */}
+                        <div className="flex items-center gap-3 px-4 py-2.5">
+                          <button
+                            type="button"
+                            onClick={() => toggleReviewBatch(i)}
+                            aria-expanded={isExpanded}
+                            aria-label={`${isExpanded ? 'Hide' : 'Show'} obligations for ${b.counterpartyName}`}
+                            className="hover-item w-5 h-5 flex-shrink-0 flex items-center justify-center rounded text-gray-400 dark:text-gray-500 transition-colors"
+                          >
+                            {isExpanded
+                              ? <ChevronDown aria-hidden="true" className="w-3.5 h-3.5" strokeWidth={2} />
+                              : <ChevronRight aria-hidden="true" className="w-3.5 h-3.5" strokeWidth={2} />}
+                          </button>
+                          <CounterpartyAvatar name={b.counterpartyName} size={24} />
+                          <button
+                            type="button"
+                            onClick={() => toggleReviewBatch(i)}
+                            className="flex-1 min-w-0 text-left"
+                          >
+                            <p className="text-xs font-semibold text-gray-800 dark:text-gray-100 truncate">{b.counterpartyName}</p>
+                            <p className="text-2xs text-gray-500 dark:text-gray-400 mt-0.5">
+                              {b.obligations.length} obligation{b.obligations.length !== 1 ? 's' : ''} · {dc} deliver · {rc} receive
+                            </p>
+                          </button>
+                          {usd > 0 && (
+                            <span className="text-xs font-semibold tabular-nums text-gray-700 dark:text-gray-200 flex-shrink-0">
+                              {fmtUsdCompact(usd)}
+                            </span>
+                          )}
+                          <button
+                            type="button"
+                            onClick={() => flipBatchDirections(i)}
+                            title="Flip deliver ↔ receive on every obligation in this batch."
+                            aria-label={`Flip directions for ${b.counterpartyName}`}
+                            className="hover-item flex-shrink-0 inline-flex items-center gap-1 text-[10px] font-medium text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 border border-gray-200 dark:border-[var(--border)] rounded-full px-2 py-0.5 transition-colors"
+                          >
+                            <RefreshCw aria-hidden="true" className="w-2.5 h-2.5" strokeWidth={2} />
+                            Flip
+                          </button>
+                        </div>
 
-              {parseError && (
-                <div className="flex items-start gap-2 px-3 py-2.5 bg-[var(--negative)]/10 border border-[var(--negative)] rounded-lg">
-                  <AlertCircle aria-hidden="true" className="w-4 h-4 text-[var(--negative)] flex-shrink-0 mt-0.5" strokeWidth={2} />
-                  <p className="text-xs text-[var(--negative)]">{parseError}</p>
+                        {/* Obligations panel — inline list, indented under the
+                            batch header. Visible only when expanded. */}
+                        {isExpanded && (
+                          <div className="bg-gray-50/60 dark:bg-[var(--surface-3)]/30 border-t border-gray-100 dark:border-[var(--border)]">
+                            {b.obligations.map((o, oi) => {
+                              const isDeliver = o.direction === 'deliver';
+                              const DirIcon = isDeliver ? ArrowUp : ArrowDown;
+                              return (
+                                <div key={oi} className="flex items-center gap-3 pl-12 pr-4 py-1.5 text-xs">
+                                  <span className="inline-flex items-center gap-1 text-[10px] font-medium text-gray-500 dark:text-gray-400 w-16 flex-shrink-0">
+                                    <DirIcon aria-hidden="true" className="w-3 h-3" strokeWidth={2} />
+                                    {isDeliver ? 'Deliver' : 'Receive'}
+                                  </span>
+                                  <span className="font-semibold text-gray-700 dark:text-gray-200 w-14 flex-shrink-0">{o.asset}</span>
+                                  <span className="tabular-nums text-gray-700 dark:text-gray-200 flex-1 text-right">
+                                    {o.amountAsset.toLocaleString(undefined, { maximumFractionDigits: 8 })}
+                                  </span>
+                                  <span className="tabular-nums text-gray-400 dark:text-gray-500 w-24 text-right flex-shrink-0">
+                                    {o.amountUsd > 0 ? fmtUsdCompact(o.amountUsd) : '—'}
+                                  </span>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
                 </div>
-              )}
+              </section>
             </div>
           </div>
         )}
 
-        {step === 'review' && parseResult && selectedBatch && (
+        {parseResult && selectedBatch && hasUnresolvedIssues && (
           <div className="flex-1 overflow-hidden flex flex-col">
-            {/* Summary strip */}
+            {/* Summary strip — only shown on the issues path */}
             <div className="flex-shrink-0 flex items-center gap-6 px-6 py-3 bg-white dark:bg-[var(--color-2)] border-b border-gray-200 dark:border-[var(--border)]">
               <div className="flex items-baseline gap-1.5">
                 <span className="text-lg font-bold tabular-nums text-gray-900 dark:text-gray-100">{n}</span>
@@ -2407,24 +2453,16 @@ function ImportModal({ onConfirm, onClose, existingCounterparties }: ImportModal
               </div>
               <span className="w-px h-6 bg-gray-200 dark:bg-[var(--border)]" />
               <div className="flex items-baseline gap-1.5">
-                <span className={`text-lg font-bold tabular-nums ${issueCounts.total > 0 ? 'text-amber-600 dark:text-amber-400' : 'text-[var(--positive)]'}`}>
+                <span className="text-lg font-bold tabular-nums text-amber-600 dark:text-amber-400">
                   {issueCounts.total}
                 </span>
                 <span className="text-2xs text-gray-500 dark:text-gray-400 uppercase tracking-wide">need attention</span>
               </div>
-              {issueCounts.total === 0 && (
-                <div className="ml-auto flex items-center gap-1.5 text-xs text-[var(--positive)] font-medium">
-                  <CheckCircle aria-hidden="true" className="w-3.5 h-3.5" strokeWidth={2} />
-                  All rows parsed cleanly
-                </div>
-              )}
-              {issueCounts.total > 0 && (
-                <div className="ml-auto flex items-center gap-3 text-2xs text-amber-700 dark:text-amber-400">
-                  {issueCounts.unknownCp > 0 && <span><span className="font-semibold">{issueCounts.unknownCp}</span> unknown CP</span>}
-                  {issueCounts.ambiguousDir > 0 && <span><span className="font-semibold">{issueCounts.ambiguousDir}</span> direction</span>}
-                  {issueCounts.missingAmount > 0 && <span><span className="font-semibold">{issueCounts.missingAmount}</span> missing amount</span>}
-                </div>
-              )}
+              <div className="ml-auto flex items-center gap-3 text-2xs text-amber-700 dark:text-amber-400">
+                {issueCounts.unknownCp > 0 && <span><span className="font-semibold">{issueCounts.unknownCp}</span> unknown CP</span>}
+                {issueCounts.ambiguousDir > 0 && <span><span className="font-semibold">{issueCounts.ambiguousDir}</span> direction</span>}
+                {issueCounts.missingAmount > 0 && <span><span className="font-semibold">{issueCounts.missingAmount}</span> missing amount</span>}
+              </div>
             </div>
 
             {/* Two-pane: batch list + detail */}
@@ -2532,6 +2570,16 @@ function ImportModal({ onConfirm, onClose, existingCounterparties }: ImportModal
                           {fmtUsdCompact(selectedBatch.obligations.reduce((s, o) => s + o.amountUsd, 0))}
                         </p>
                       </div>
+                      {/* Per-batch flip — scoped to the selected batch only. */}
+                      <button
+                        type="button"
+                        onClick={() => flipBatchDirections(selectedBatchIdx)}
+                        title="Flip deliver ↔ receive on every obligation in this batch."
+                        className="hover-item self-end inline-flex items-center gap-1.5 text-2xs font-medium text-gray-600 dark:text-gray-300 border border-gray-200 dark:border-[var(--border)] hover:bg-gray-50 dark:hover:bg-[var(--surface-3)] rounded-full px-2.5 py-1 transition-colors"
+                      >
+                        <RefreshCw aria-hidden="true" className="w-3 h-3" strokeWidth={2} />
+                        Flip directions
+                      </button>
                     </div>
                   </div>
                 </div>
@@ -2659,9 +2707,6 @@ function ImportModal({ onConfirm, onClose, existingCounterparties }: ImportModal
                                   Enter amount
                                 </span>
                               )}
-                              {!hasIssue && ob.hint && (
-                                <span className="text-gray-400 dark:text-gray-500 italic">{ob.hint}</span>
-                              )}
                             </td>
                           </tr>
                         );
@@ -2674,92 +2719,36 @@ function ImportModal({ onConfirm, onClose, existingCounterparties }: ImportModal
           </div>
         )}
 
-        {step === 'complete' && (
-          <div className="flex-1 overflow-y-auto flex items-center justify-center px-6 py-8">
-            <div className="w-full max-w-xl text-center space-y-5">
-              <div className="w-16 h-16 mx-auto rounded-full bg-[var(--positive)]/15 flex items-center justify-center">
-                <CheckCircle aria-hidden="true" className="w-9 h-9 text-[var(--positive)]" strokeWidth={2} />
-              </div>
-              <div>
-                <p className="text-xl font-bold text-gray-900 dark:text-gray-100">
-                  {importedBatches.length} batch{importedBatches.length !== 1 ? 'es' : ''} imported
-                </p>
-                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1.5">
-                  {totalObl} obligation{totalObl !== 1 ? 's' : ''} created as <span className="font-semibold">{submitMode === 'direct' ? 'Pending' : 'Draft'}</span>
-                </p>
-              </div>
-              <div className="text-left rounded-xl border border-gray-200 dark:border-[var(--border)] bg-white dark:bg-[var(--color-2)] divide-y divide-gray-100 dark:divide-[var(--border)] max-h-64 overflow-y-auto">
-                {importedBatches.map((b, i) => (
-                  <div key={i} className="flex items-center justify-between px-4 py-2">
-                    <span className="text-xs font-semibold text-gray-700 dark:text-gray-200">{b.counterpartyName}</span>
-                    <span className="text-2xs tabular-nums text-gray-500 dark:text-gray-400">{b.id}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-        )}
       </div>
 
-      {/* Footer */}
-      <div className="flex-shrink-0 px-6 py-3 bg-white dark:bg-black border-t border-gray-200 dark:border-[var(--border)] flex items-center justify-end gap-2.5">
-        {step !== 'upload' && step !== 'complete' && (
-          <button
-            onClick={goBack}
-            className="hover-item px-4 py-1.5 text-xs font-medium text-gray-700 dark:text-gray-300 bg-white dark:bg-[var(--surface-3)] border border-gray-300 dark:border-[var(--border)] rounded-full transition-colors mr-auto"
-          >
-            ← Back
-          </button>
-        )}
-        {step !== 'complete' && (
-          <button
-            onClick={onClose}
-            className="hover-item px-4 py-1.5 text-xs font-medium text-gray-700 dark:text-gray-300 bg-white dark:bg-[var(--surface-3)] border border-gray-300 dark:border-[var(--border)] rounded-full transition-colors"
-          >
-            Cancel
-          </button>
-        )}
-        {step === 'review' ? (
-          <>
-            <button
-              onClick={() => { if (canGoNext) { setSubmitMode('draft'); finalize('draft'); } }}
-              disabled={!canGoNext}
-              className={`flex items-center gap-1.5 px-4 py-1.5 text-xs font-medium rounded-full transition-colors border ${
-                canGoNext
-                  ? 'text-gray-700 dark:text-gray-200 bg-white dark:bg-[var(--surface-3)] border-gray-300 dark:border-[var(--border)] hover:bg-gray-100 dark:hover:bg-[var(--surface-2)]'
-                  : 'text-gray-400 dark:text-gray-600 bg-white dark:bg-[var(--surface-3)] border-gray-200 dark:border-[var(--border)] opacity-50 cursor-not-allowed'
-              }`}
-            >
-              Import as draft{n !== 1 ? 's' : ''}
-            </button>
-            <button
-              onClick={() => { if (canGoNext) { setSubmitMode('direct'); finalize('direct'); } }}
-              disabled={!canGoNext}
-              className={`flex items-center gap-1.5 px-4 py-1.5 text-xs font-medium rounded-full transition-colors text-gray-900 bg-[#CDF698] ${canGoNext ? 'hover:bg-[var(--color-200)]' : 'opacity-30 cursor-not-allowed'}`}
-            >
-              <CheckCircle aria-hidden="true" className="w-3 h-3" strokeWidth={2.5} />
-              Send to counterparties
-            </button>
-          </>
-        ) : step === 'complete' ? (
-          <button
-            onClick={handleDone}
-            autoFocus
-            className="flex items-center gap-1.5 px-4 py-1.5 text-xs font-medium rounded-full transition-colors text-gray-900 bg-[#CDF698] hover:bg-[var(--color-200)]"
-          >
-            View imported batches
-            <ChevronRight aria-hidden="true" className="w-3 h-3" strokeWidth={2.5} />
-          </button>
-        ) : (
-          <button
-            onClick={goNext}
-            disabled={!canGoNext}
-            className={`flex items-center gap-1.5 px-4 py-1.5 text-xs font-medium rounded-full transition-colors text-gray-900 bg-[#CDF698] ${canGoNext ? 'hover:bg-[var(--color-200)]' : 'opacity-30 cursor-not-allowed'}`}
-          >
-            Continue
-            <ChevronRight aria-hidden="true" className="w-3 h-3" strokeWidth={2.5} />
-          </button>
-        )}
+      {/* Footer — single-step review. Cancel (left) is the only exit. */}
+      <div className="flex-shrink-0 px-6 py-3 bg-white dark:bg-black border-t border-gray-200 dark:border-[var(--border)] flex items-center gap-2.5">
+        <button
+          onClick={onClose}
+          className="hover-item px-4 py-1.5 text-xs font-medium text-gray-600 dark:text-gray-300 border border-gray-200 dark:border-[var(--border)] hover:bg-gray-50 dark:hover:bg-[var(--surface-3)] rounded-full transition-colors"
+        >
+          Cancel
+        </button>
+        <div className="flex-1" />
+        <button
+          onClick={() => { if (canSubmit) finalize('draft'); }}
+          disabled={!canSubmit}
+          className={`flex items-center gap-1.5 px-4 py-1.5 text-xs font-medium rounded-full transition-colors border ${
+            canSubmit
+              ? 'text-gray-700 dark:text-gray-200 bg-white dark:bg-[var(--surface-3)] border-gray-300 dark:border-[var(--border)] hover:bg-gray-100 dark:hover:bg-[var(--surface-2)]'
+              : 'text-gray-400 dark:text-gray-600 bg-white dark:bg-[var(--surface-3)] border-gray-200 dark:border-[var(--border)] opacity-50 cursor-not-allowed'
+          }`}
+        >
+          Save as draft{n !== 1 ? 's' : ''}
+        </button>
+        <button
+          onClick={() => { if (canSubmit) finalize('direct'); }}
+          disabled={!canSubmit}
+          className={`flex items-center gap-1.5 px-4 py-1.5 text-xs font-medium rounded-full transition-colors text-gray-900 bg-[#CDF698] ${canSubmit ? 'hover:bg-[var(--color-200)]' : 'opacity-30 cursor-not-allowed'}`}
+        >
+          <CheckCircle aria-hidden="true" className="w-3 h-3" strokeWidth={2.5} />
+          Send to counterparties
+        </button>
       </div>
     </div>
   );
@@ -2923,145 +2912,10 @@ function PostedTotalOverview({ batches }: { batches: Batch[] }) {
   );
 }
 
-// ── Batches Landing (default workspace) ───────────────────────────────────────
-
-interface BatchesLandingProps {
-  filteredBatches: Batch[];
-  onSelectBatch: (id: string) => void;
-}
-
-function BatchesLanding({ filteredBatches, onSelectBatch }: BatchesLandingProps) {
-  const draftCount     = filteredBatches.filter(b => b.status === 'Draft').length;
-  const pendingCount   = filteredBatches.filter(b => b.status === 'Pending').length;
-  const approvedCount  = filteredBatches.filter(b => b.status === 'Approved').length;
-
-  const totalDeliver = filteredBatches.reduce(
-    (s, b) => s + b.deliverObligations.reduce((ss, o) => ss + o.amountUsd, 0), 0
-  );
-  const totalReceive = filteredBatches.reduce(
-    (s, b) => s + b.receiveObligations.reduce((ss, o) => ss + o.amountUsd, 0), 0
-  );
-  const net = totalReceive - totalDeliver;
-
-  // Group by counterparty
-  const cpMap = new Map<string, { count: number; deliver: number; receive: number; ids: string[]; statuses: BatchStatus[] }>();
-  for (const batch of filteredBatches) {
-    const data = cpMap.get(batch.counterpartyName) ?? { count: 0, deliver: 0, receive: 0, ids: [], statuses: [] };
-    data.count += 1;
-    data.deliver += batch.deliverObligations.reduce((s, o) => s + o.amountUsd, 0);
-    data.receive += batch.receiveObligations.reduce((s, o) => s + o.amountUsd, 0);
-    data.ids.push(batch.id);
-    data.statuses.push(batch.status);
-    cpMap.set(batch.counterpartyName, data);
-  }
-  const sortedCps = [...cpMap.entries()].sort(
-    (a, b) => (b[1].deliver + b[1].receive) - (a[1].deliver + a[1].receive)
-  );
-
-  const today = new Date();
-  const dateLabel = today.toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric', year: 'numeric' });
-
-  if (filteredBatches.length === 0) {
-    return (
-      <div className="h-full flex flex-col items-center justify-center gap-3 text-gray-400 dark:text-gray-500">
-        <Calendar aria-hidden="true" className="w-10 h-10 opacity-40" strokeWidth={1.5} />
-        <p className="text-sm">No batches match the current filters</p>
-      </div>
-    );
-  }
-
-  return (
-    <div className="h-full overflow-y-auto px-4 py-4 space-y-4">
-      {/* Header */}
-      <div>
-        <h1 className="text-base font-bold text-gray-900 dark:text-gray-100">Today's batches</h1>
-        <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{dateLabel} · {filteredBatches.length} active</p>
-      </div>
-
-      {/* Status breakdown */}
-      <div className="grid grid-cols-3 gap-3">
-        {[
-          { label: 'Draft',    count: draftCount,    accent: 'text-gray-500 dark:text-gray-400' },
-          { label: 'Pending',  count: pendingCount,  accent: 'text-amber-600 dark:text-amber-400' },
-          { label: 'Approved', count: approvedCount, accent: 'text-[var(--color-700)] dark:text-[var(--color-300)]' },
-        ].map(({ label, count, accent }) => (
-          <div key={label} className="rounded-xl bg-white dark:bg-[var(--color-2)] px-4 py-3">
-            <p className={`text-2xs uppercase tracking-wide font-semibold ${accent}`}>{label}</p>
-            <p className="text-2xl font-bold tabular-nums mt-1 text-gray-900 dark:text-gray-100">{count}</p>
-            <p className="text-2xs text-gray-400 dark:text-gray-500 mt-0.5">batch{count !== 1 ? 'es' : ''}</p>
-          </div>
-        ))}
-      </div>
-
-      {/* Financial KPIs */}
-      <div className="grid grid-cols-3 gap-3">
-        <div className="rounded-xl bg-white dark:bg-[var(--color-2)] px-4 py-3">
-          <div className="flex items-center gap-1.5">
-            <ArrowUp aria-hidden="true" className="w-3.5 h-3.5 text-[var(--negative)]" strokeWidth={2} />
-            <p className="text-2xs uppercase tracking-wide font-semibold text-[var(--negative)]">To deliver</p>
-          </div>
-          <p className="text-base font-bold tabular-nums mt-1.5 text-gray-900 dark:text-gray-100">{fmtUsdFull(totalDeliver)}</p>
-        </div>
-        <div className="rounded-xl bg-white dark:bg-[var(--color-2)] px-4 py-3">
-          <div className="flex items-center gap-1.5">
-            <ArrowDown aria-hidden="true" className="w-3.5 h-3.5 text-[var(--positive)]" strokeWidth={2} />
-            <p className="text-2xs uppercase tracking-wide font-semibold text-[var(--positive)]">To receive</p>
-          </div>
-          <p className="text-base font-bold tabular-nums mt-1.5 text-gray-900 dark:text-gray-100">{fmtUsdFull(totalReceive)}</p>
-        </div>
-        <div className="rounded-xl bg-white dark:bg-[var(--color-2)] px-4 py-3">
-          <p className="text-2xs uppercase tracking-wide font-semibold text-gray-500 dark:text-gray-400">Net position</p>
-          <p className={`text-base font-bold tabular-nums mt-1.5 ${net >= 0 ? 'text-[var(--positive)]' : 'text-[var(--negative)]'}`}>
-            {net >= 0 ? '+' : '−'}{fmtUsdFull(Math.abs(net))}
-          </p>
-        </div>
-      </div>
-
-      {/* By counterparty */}
-      <div className="rounded-2xl overflow-hidden bg-white dark:bg-[var(--color-2)]">
-        <div className="px-4 py-2.5">
-          <span className="text-xs font-semibold text-gray-700 dark:text-gray-200">By counterparty</span>
-        </div>
-        <table className="w-full text-xs px-3">
-          <thead>
-            <tr className="bg-gray-50 dark:bg-[var(--color-1)] text-gray-500 dark:text-gray-400 border-b border-gray-100 dark:border-[var(--border)] text-[10px] uppercase tracking-wide">
-              <th className="text-left pl-4 pr-2 py-2 font-medium">Counterparty</th>
-              <th className="text-right px-2 py-2 font-medium">Batches</th>
-              <th className="text-right px-2 py-2 font-medium">Deliver</th>
-              <th className="text-right px-2 py-2 font-medium">Receive</th>
-              <th className="text-right pr-4 py-2 font-medium">Net</th>
-            </tr>
-          </thead>
-          <tbody>
-            {sortedCps.map(([cp, { count, deliver, receive, ids }]) => {
-              const cpNet = receive - deliver;
-              return (
-                <tr
-                  key={cp}
-                  onClick={() => ids[0] && onSelectBatch(ids[0])}
-                  className="cursor-pointer hover:bg-gray-50 dark:hover:bg-[var(--surface-3)] border-b border-gray-50 dark:border-[var(--border)] last:border-b-0 transition-colors"
-                >
-                  <td className="pl-4 pr-2 py-2.5">
-                    <div className="flex items-center gap-2">
-                      <CounterpartyAvatar name={cp} size={20} />
-                      <span className="font-medium text-gray-800 dark:text-gray-100">{cp}</span>
-                    </div>
-                  </td>
-                  <td className="text-right px-2 py-2.5 tabular-nums text-gray-600 dark:text-gray-300">{count}</td>
-                  <td className="text-right px-2 py-2.5 tabular-nums text-[var(--negative)]">{deliver > 0 ? fmtUsdFull(deliver) : '—'}</td>
-                  <td className="text-right px-2 py-2.5 tabular-nums text-[var(--positive)]">{receive > 0 ? fmtUsdFull(receive) : '—'}</td>
-                  <td className={`text-right pr-4 py-2.5 tabular-nums font-semibold ${cpNet >= 0 ? 'text-[var(--positive)]' : 'text-[var(--negative)]'}`}>
-                    {cpNet >= 0 ? '+' : '−'}{fmtUsdFull(Math.abs(cpNet))}
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  );
-}
+// BatchesLanding (the per-counterparty workspace previously rendered when no
+// batch was selected) was removed — the main Batches dashboard now owns the
+// "no selected batch" state. See the effect in BatchesView that bounces detail
+// mode back to dashboard when there's nothing to show on the right.
 
 // ── Main BatchesView ───────────────────────────────────────────────────────────
 
@@ -3071,7 +2925,6 @@ interface SavedFilters {
   datePreset: string;
   statusFilter: string[];
   cpFilter: string[];
-  needsMyAction?: boolean;
 }
 
 function loadSavedFilters(): SavedFilters | null {
@@ -3091,17 +2944,22 @@ interface NewBatchModalProps {
   open: boolean;
   onClose: () => void;
   onCreate: (counterpartyName: string, cutoffLocal: string) => void;
+  /** Fired when the user drops or browses CSV files inside this modal. The
+   *  parent closes this modal and hands the files to the import flow. */
+  onImportFiles: (files: File[]) => void;
   allCounterparties: string[];
   defaultCutoff: string;
 }
 
-function NewBatchModal({ open, onClose, onCreate, allCounterparties, defaultCutoff }: NewBatchModalProps) {
+function NewBatchModal({ open, onClose, onCreate, onImportFiles, allCounterparties, defaultCutoff }: NewBatchModalProps) {
   const [cp, setCp] = useState('');
   const [cutoff, setCutoff] = useState(defaultCutoff);
   const [cpSearch, setCpSearch] = useState('');
   const [cpDropdownOpen, setCpDropdownOpen] = useState(false);
+  const [isDragging, setIsDragging] = useState(false);
   const cpRef = useRef<HTMLDivElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
 
   // Reset state every time the modal opens.
   useEffect(() => {
@@ -3109,9 +2967,8 @@ function NewBatchModal({ open, onClose, onCreate, allCounterparties, defaultCuto
       setCp('');
       setCutoff(defaultCutoff);
       setCpSearch('');
-      setCpDropdownOpen(true);
-      // Focus the search field after the modal mounts.
-      setTimeout(() => searchRef.current?.focus(), 0);
+      setCpDropdownOpen(false);
+      setIsDragging(false);
     }
   }, [open, defaultCutoff]);
 
@@ -3122,6 +2979,30 @@ function NewBatchModal({ open, onClose, onCreate, allCounterparties, defaultCuto
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [open, onClose]);
+
+  // While the modal is open, swallow stray file drops at the window level.
+  // Without this, a CSV dropped slightly outside the dotted drop zone (e.g.
+  // on the backdrop) triggers the browser's default "navigate to file"
+  // behaviour — the page is replaced by the CSV text and looks like a black
+  // screen. Drops that DO land inside the drop zone still fire normally
+  // because the zone's handler runs first and stops propagation via its own
+  // event handler.
+  useEffect(() => {
+    if (!open) return;
+    const swallow = (e: DragEvent) => {
+      // If the drop target is inside the modal's drop zone, let the React
+      // handler run. Otherwise prevent the browser's default file-open.
+      const zone = fileRef.current?.closest('[role="button"]');
+      if (zone && e.target instanceof Node && zone.contains(e.target)) return;
+      e.preventDefault();
+    };
+    window.addEventListener('dragover', swallow);
+    window.addEventListener('drop', swallow);
+    return () => {
+      window.removeEventListener('dragover', swallow);
+      window.removeEventListener('drop', swallow);
+    };
+  }, [open]);
 
   // Click-outside to close the counterparty dropdown.
   useEffect(() => {
@@ -3153,8 +3034,8 @@ function NewBatchModal({ open, onClose, onCreate, allCounterparties, defaultCuto
         {/* Header */}
         <div className="px-5 py-3.5 border-b border-gray-100 dark:border-[var(--border)] flex items-center justify-between">
           <div>
-            <h2 id="new-batch-modal-title" className="text-sm font-semibold text-gray-900 dark:text-gray-100">New batch</h2>
-            <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-0.5">Pick a counterparty and the cutoff. You'll add obligations next.</p>
+            <h2 id="new-batch-modal-title" className="text-sm font-semibold text-gray-900 dark:text-gray-100">Add batch</h2>
+            <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-0.5">Drop a CSV to import, or fill in the form for a blank batch.</p>
           </div>
           <button
             onClick={onClose}
@@ -3167,6 +3048,74 @@ function NewBatchModal({ open, onClose, onCreate, allCounterparties, defaultCuto
 
         {/* Body */}
         <div className="p-5 space-y-4">
+          {/* CSV drop zone — drop or click to browse */}
+          <input
+            ref={fileRef}
+            type="file"
+            accept=".csv,.txt"
+            multiple
+            className="sr-only"
+            aria-label="Upload CSV or text files"
+            onChange={(e) => {
+              const files = e.target.files;
+              if (!files || files.length === 0) return;
+              onImportFiles(Array.from(files));
+              e.target.value = '';
+            }}
+          />
+          <div
+            onClick={() => fileRef.current?.click()}
+            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); fileRef.current?.click(); } }}
+            onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
+            onDragEnter={(e) => { e.preventDefault(); setIsDragging(true); }}
+            onDragLeave={(e) => {
+              if (e.currentTarget.contains(e.relatedTarget as Node)) return;
+              setIsDragging(false);
+            }}
+            onDrop={(e) => {
+              e.preventDefault();
+              setIsDragging(false);
+              const files = e.dataTransfer.files;
+              if (!files || files.length === 0) return;
+              onImportFiles(Array.from(files));
+            }}
+            role="button"
+            tabIndex={0}
+            aria-label="Import obligations from CSV by drag and drop or click to browse"
+            className={`w-full rounded-xl border-2 border-dashed transition-colors cursor-pointer px-5 py-6 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[oklch(0.683_0.106_127.892_/_0.45)] ${
+              isDragging
+                ? 'border-[var(--color-700)] bg-[var(--color-50)] dark:bg-[var(--color-950)]/30'
+                : 'border-gray-300 dark:border-[var(--border)] bg-gray-50 dark:bg-[var(--surface-3)] hover:border-[var(--color-700)] hover:bg-[var(--color-50)] dark:hover:bg-[var(--color-950)]/20'
+            }`}
+          >
+            <div className="flex items-center gap-3 pointer-events-none">
+              <div className={`w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0 ${
+                isDragging
+                  ? 'bg-[var(--color-700)] text-white dark:bg-[var(--color-300)] dark:text-gray-900'
+                  : 'bg-white dark:bg-[var(--color-2)] text-gray-500 dark:text-gray-400'
+              }`}>
+                <Upload aria-hidden="true" className="w-4 h-4" strokeWidth={1.75} />
+              </div>
+              <div>
+                <p className="text-xs font-semibold text-gray-700 dark:text-gray-200">
+                  {isDragging ? 'Drop files to import' : 'Drop CSV file(s) or click to browse'}
+                </p>
+                <p className="text-[10px] text-gray-400 dark:text-gray-500 mt-0.5">
+                  .csv or .txt · supports multiple files
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* Divider — or fill in a blank batch */}
+          <div className="flex items-center gap-3">
+            <div className="flex-1 h-px bg-gray-100 dark:bg-[var(--border)]" />
+            <span className="text-[10px] uppercase tracking-wide font-medium text-gray-400 dark:text-gray-500">
+              or new blank batch
+            </span>
+            <div className="flex-1 h-px bg-gray-100 dark:bg-[var(--border)]" />
+          </div>
+
           {/* Counterparty */}
           <div ref={cpRef}>
             <label className="block text-[10px] uppercase tracking-wide text-gray-500 dark:text-gray-400 font-medium mb-1.5">Counterparty</label>
@@ -3288,6 +3237,7 @@ interface BatchesViewProps {
 }
 
 export default function BatchesView({ batches, onBatchesChange, initialBatchId, initialCpFilter, isDemo }: BatchesViewProps) {
+  const tz = useContext(TimeZoneContext);
   const [selectedId, setSelectedId] = useState<string>(initialBatchId ?? '');
   const [focusedIndex, setFocusedIndex] = useState<number>(0);
   const [batchesMode, setBatchesMode] = useState<'dashboard' | 'detail'>(() => initialBatchId ? 'detail' : 'dashboard');
@@ -3298,6 +3248,14 @@ export default function BatchesView({ batches, onBatchesChange, initialBatchId, 
     const saved = parseFloat(localStorage.getItem('cycles-prime:detail-sidebar-pct') ?? '');
     return Number.isFinite(saved) && saved >= 22 && saved <= 55 ? saved : 30;
   });
+  // When collapsed the sidebar renders as a thin rail with just an expand
+  // affordance. Persisted so users don't have to re-collapse every visit.
+  const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(
+    () => localStorage.getItem('cycles-prime:detail-sidebar-collapsed') === '1',
+  );
+  useEffect(() => {
+    try { localStorage.setItem('cycles-prime:detail-sidebar-collapsed', sidebarCollapsed ? '1' : '0'); } catch {}
+  }, [sidebarCollapsed]);
   const [isResizing, setIsResizing] = useState(false);
   const resizeContainerRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -3307,6 +3265,13 @@ export default function BatchesView({ batches, onBatchesChange, initialBatchId, 
       if (!c) return;
       const rect = c.getBoundingClientRect();
       const pct = ((e.clientX - rect.left) / rect.width) * 100;
+      const pxAtPct = (pct / 100) * rect.width;
+      // Drag below the counterparty-name min width → collapse entirely.
+      if (pxAtPct < 200) {
+        setSidebarCollapsed(true);
+        setIsResizing(false);
+        return;
+      }
       const clamped = Math.max(22, Math.min(55, pct));
       setSidebarWidth(clamped);
     };
@@ -3341,9 +3306,30 @@ export default function BatchesView({ batches, onBatchesChange, initialBatchId, 
     return () => obs.disconnect();
   }, [batchesMode]);
   const [showImport, setShowImport] = useState(false);
-  const [showAddMenu, setShowAddMenu]         = useState(false);
   const [showNewBatchForm, setShowNewBatchForm] = useState(false);
-  const addMenuRef = useRef<HTMLDivElement>(null);
+  // When the user drops CSVs in the New-batch modal, we close it and pass the
+  // files to the import flow so it lands directly on the review step.
+  const [importInitialFiles, setImportInitialFiles] = useState<File[]>([]);
+  const handleNewBatchImportFiles = (files: File[]) => {
+    setShowNewBatchForm(false);
+    setImportInitialFiles(files);
+    setShowImport(true);
+  };
+  const closeImportFlow = () => {
+    setShowImport(false);
+    setImportInitialFiles([]);
+  };
+  // Batches just imported — surfaces a small "new" dot on each row in the
+  // sidebar until the user clicks into it.
+  const [newlyImportedIds, setNewlyImportedIds] = useState<Set<string>>(new Set());
+  const clearNewBadge = (id: string) => {
+    setNewlyImportedIds((prev) => {
+      if (!prev.has(id)) return prev;
+      const next = new Set(prev);
+      next.delete(id);
+      return next;
+    });
+  };
   type DatePreset = 'all' | 'today' | '24h' | '3d' | '7d' | '30d' | '3m' | 'custom';
   const [datePreset, setDatePreset] = useState<DatePreset>(
     () => (loadSavedFilters()?.datePreset as DatePreset) ?? 'today'
@@ -3354,9 +3340,16 @@ export default function BatchesView({ batches, onBatchesChange, initialBatchId, 
   const [showOverview, setShowOverview] = useState(false);
   // Status filter — empty set means "all active statuses"
   const ARCHIVED_STATUSES = new Set<BatchStatus>(['Revoked', 'Deleted', 'Rejected']);
-  const ACTIVE_STATUSES: BatchStatus[] = ['Draft', 'Pending', 'Approved', 'Cleared', 'Cancelled'];
-  const [statusFilter, setStatusFilter] = useState<Set<BatchStatus>>(
-    () => new Set((loadSavedFilters()?.statusFilter as BatchStatus[]) ?? ['Draft', 'Pending', 'Approved'])
+  // Filter chips use *display* statuses so users can target "Pending approval"
+  // separately from "Awaiting counterparty" (both map to data status `Pending`).
+  const ACTIVE_STATUSES: DisplayStatus[] = ['Draft', 'Pending approval', 'Awaiting counterparty', 'Approved', 'Cleared', 'Cancelled'];
+  const [statusFilter, setStatusFilter] = useState<Set<DisplayStatus>>(
+    () => {
+      const raw = (loadSavedFilters()?.statusFilter as string[] | undefined) ?? ['Draft', 'Pending approval', 'Awaiting counterparty', 'Approved'];
+      // Migrate any legacy 'Pending' entries from before the split.
+      const migrated = raw.flatMap(s => s === 'Pending' ? ['Pending approval', 'Awaiting counterparty'] : [s]);
+      return new Set(migrated.filter((s): s is DisplayStatus => (ACTIVE_STATUSES as string[]).includes(s)));
+    }
   );
   const [showArchived, setShowArchived] = useState(false);
   const [showStatusFilter, setShowStatusFilter] = useState(false);
@@ -3369,11 +3362,8 @@ export default function BatchesView({ batches, onBatchesChange, initialBatchId, 
   const [showCpFilter, setShowCpFilter] = useState(false);
   const [cpSearch, setCpSearch] = useState('');
   const cpFilterRef = useRef<HTMLDivElement>(null);
-  const [needsMyAction, setNeedsMyAction] = useState<boolean>(
-    () => loadSavedFilters()?.needsMyAction ?? false
-  );
   const [listSearch, setListSearch] = useState('');
-  type BatchSortCol = 'id' | 'counterparty' | 'status' | 'direction' | 'cutoff' | 'obligations' | 'deliver' | 'receive' | 'net';
+  type BatchSortCol = 'id' | 'counterparty' | 'status' | 'cutoff' | 'obligations' | 'deliver' | 'receive' | 'net';
   const [batchSortCol, setBatchSortCol] = useState<BatchSortCol>('cutoff');
   const [batchSortDir, setBatchSortDir] = useState<'asc' | 'desc'>('desc');
   // Infinite-scroll window for the dashboard table
@@ -3430,19 +3420,8 @@ export default function BatchesView({ batches, onBatchesChange, initialBatchId, 
   }, [showCpFilter]);
 
   useEffect(() => {
-    if (!showAddMenu) return;
-    const handler = (e: MouseEvent) => {
-      if (addMenuRef.current && !addMenuRef.current.contains(e.target as Node)) {
-        setShowAddMenu(false);
-      }
-    };
-    document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
-  }, [showAddMenu]);
-
-  useEffect(() => {
-    saveSavedFilters({ datePreset, statusFilter: Array.from(statusFilter), cpFilter: Array.from(cpFilter), needsMyAction });
-  }, [datePreset, statusFilter, cpFilter, needsMyAction]);
+    saveSavedFilters({ datePreset, statusFilter: Array.from(statusFilter), cpFilter: Array.from(cpFilter) });
+  }, [datePreset, statusFilter, cpFilter]);
 
   const allCounterparties = Array.from(new Set(batches.map(b => b.counterpartyName))).sort();
 
@@ -3450,15 +3429,10 @@ export default function BatchesView({ batches, onBatchesChange, initialBatchId, 
     let result = batches;
     // Archive filter — hide Revoked/Deleted/Rejected unless opted in
     if (!showArchived) result = result.filter(b => !ARCHIVED_STATUSES.has(b.status));
-    // Status filter — empty = all
-    if (statusFilter.size > 0) result = result.filter(b => statusFilter.has(b.status));
+    // Status filter — empty = all. Matches against the display label so that
+    // "Pending approval" and "Awaiting counterparty" can be filtered separately.
+    if (statusFilter.size > 0) result = result.filter(b => statusFilter.has(getDisplayStatus(b)));
     if (cpFilter.size > 0) result = result.filter(b => cpFilter.has(b.counterpartyName));
-    if (needsMyAction) {
-      result = result.filter(b =>
-        (b.status === 'Draft' && b.origin === 'created' && (b.deliverObligations.length + b.receiveObligations.length) > 0) ||
-        (b.status === 'Pending' && b.origin === 'requested')
-      );
-    }
     // Date filter
     if (datePreset === 'today') {
       const today = new Date();
@@ -3498,7 +3472,6 @@ export default function BatchesView({ batches, onBatchesChange, initialBatchId, 
       case 'id':           cmp = a.id.localeCompare(b.id); break;
       case 'counterparty': cmp = a.counterpartyName.localeCompare(b.counterpartyName); break;
       case 'status':       cmp = a.status.localeCompare(b.status); break;
-      case 'direction':    cmp = (a.origin ?? '').localeCompare(b.origin ?? ''); break;
       case 'cutoff':       cmp = new Date(a.cutoffTime).getTime() - new Date(b.cutoffTime).getTime(); break;
       case 'obligations':  cmp = (a.deliverObligations.length + a.receiveObligations.length) - (b.deliverObligations.length + b.receiveObligations.length); break;
       case 'deliver':      cmp = aD - bD; break;
@@ -3527,7 +3500,6 @@ export default function BatchesView({ batches, onBatchesChange, initialBatchId, 
       case 'id':           cmp = a.id.localeCompare(b.id); break;
       case 'counterparty': cmp = a.counterpartyName.localeCompare(b.counterpartyName); break;
       case 'status':       cmp = a.status.localeCompare(b.status); break;
-      case 'direction':    cmp = (a.origin ?? '').localeCompare(b.origin ?? ''); break;
       case 'cutoff':       cmp = new Date(a.cutoffTime).getTime() - new Date(b.cutoffTime).getTime(); break;
       case 'obligations':  cmp = (a.deliverObligations.length + a.receiveObligations.length) - (b.deliverObligations.length + b.receiveObligations.length); break;
       case 'deliver':      cmp = aD - bD; break;
@@ -3579,9 +3551,14 @@ export default function BatchesView({ batches, onBatchesChange, initialBatchId, 
 
   const handleImportConfirm = (newBatches: Batch[]) => {
     onBatchesChange([...batches, ...newBatches]);
-    setSelectedId(newBatches[0].id);
+    // Pre-select only the first imported batch and mark the rest as "new" so
+    // the user can identify them in the sidebar and browse one by one.
+    const firstId = newBatches[0].id;
+    setSelectedId(firstId);
+    setNewlyImportedIds(new Set(newBatches.slice(1).map((b) => b.id)));
     setFocusedIndex(batches.length);
     setShowImport(false);
+    setImportInitialFiles([]);
     setBatchesMode('detail');
   };
 
@@ -3609,7 +3586,6 @@ export default function BatchesView({ batches, onBatchesChange, initialBatchId, 
     setSelectedId(newBatch.id);
     setFocusedIndex(0);
     setShowNewBatchForm(false);
-    setShowAddMenu(false);
     setShowOverview(false);
     setBatchesMode('detail');
     // Widen the date filter so the new batch is visible when the user
@@ -3630,20 +3606,32 @@ export default function BatchesView({ batches, onBatchesChange, initialBatchId, 
 
   const selectedBatch = selectedId ? filteredBatches.find((b) => b.id === selectedId) : undefined;
 
+  // If we're in detail mode but have nothing to show on the right (e.g. the
+  // selected batch was just deleted or filtered out), kick back to the main
+  // dashboard — the standalone "BatchesLanding" placeholder is no longer used.
+  useEffect(() => {
+    if (batchesMode === 'detail' && !selectedBatch && !showOverview) {
+      setBatchesMode('dashboard');
+    }
+  }, [batchesMode, selectedBatch, showOverview]);
+
   const handleKeyDown = useCallback(
     (e: KeyboardEvent<HTMLDivElement>) => {
       if (e.key === 'ArrowDown') {
         e.preventDefault();
         const next = Math.min(focusedIndex + 1, detailFilteredBatches.length - 1);
         setFocusedIndex(next);
-        if (detailFilteredBatches[next]) setSelectedId(detailFilteredBatches[next].id);
+        const b = detailFilteredBatches[next];
+        if (b) { setSelectedId(b.id); clearNewBadge(b.id); }
       } else if (e.key === 'ArrowUp') {
         e.preventDefault();
         const prev = Math.max(focusedIndex - 1, 0);
         setFocusedIndex(prev);
-        if (detailFilteredBatches[prev]) setSelectedId(detailFilteredBatches[prev].id);
+        const b = detailFilteredBatches[prev];
+        if (b) { setSelectedId(b.id); clearNewBadge(b.id); }
       } else if (e.key === 'Enter' || e.key === ' ') {
-        if (detailFilteredBatches[focusedIndex]) setSelectedId(detailFilteredBatches[focusedIndex].id);
+        const b = detailFilteredBatches[focusedIndex];
+        if (b) { setSelectedId(b.id); clearNewBadge(b.id); }
       }
     },
     [detailFilteredBatches, focusedIndex]
@@ -3674,9 +3662,10 @@ export default function BatchesView({ batches, onBatchesChange, initialBatchId, 
   };
 
   // ── Dashboard computed values ──────────────────────────────────────────────────
-  const draftCount    = filteredBatches.filter(b => b.status === 'Draft').length;
-  const pendingCount  = filteredBatches.filter(b => b.status === 'Pending').length;
-  const approvedCount = filteredBatches.filter(b => b.status === 'Approved').length;
+  const draftCount      = filteredBatches.filter(b => getDisplayStatus(b) === 'Draft').length;
+  const myApprovalCount = filteredBatches.filter(b => getDisplayStatus(b) === 'Pending approval').length;
+  const awaitingCpCount = filteredBatches.filter(b => getDisplayStatus(b) === 'Awaiting counterparty').length;
+  const approvedCount   = filteredBatches.filter(b => getDisplayStatus(b) === 'Approved').length;
   const totalDeliver  = filteredBatches.reduce(
     (s, b) => s + b.deliverObligations.reduce((ss, o) => ss + o.amountUsd, 0), 0
   );
@@ -3688,7 +3677,7 @@ export default function BatchesView({ batches, onBatchesChange, initialBatchId, 
   const isDateFiltered = datePreset !== 'all';
   const isStatusFiltered = statusFilter.size > 0 || showArchived;
   const isCpFiltered = cpFilter.size > 0;
-  const isAnyFiltered = isDateFiltered || isStatusFiltered || isCpFiltered || needsMyAction;
+  const isAnyFiltered = isDateFiltered || isStatusFiltered || isCpFiltered;
   const PRESETS_DASH: { label: string; value: DatePreset }[] = [
     { label: 'Today',    value: 'today' },
     { label: 'All time', value: 'all'   },
@@ -3727,6 +3716,7 @@ export default function BatchesView({ batches, onBatchesChange, initialBatchId, 
                   onClick={() => window.dispatchEvent(new CustomEvent('navigate-tab', { detail: 'cycles' }))}
                   className="flex items-center gap-1 text-2xs text-amber-600 dark:text-amber-400 hover:text-amber-700 dark:hover:text-amber-300 transition-colors"
                 >
+                  <span className="text-gray-400 dark:text-gray-500">In</span>
                   <NumberFlowGroup>
                     <span className="tabular-nums flex items-center" style={{ fontVariantNumeric: 'tabular-nums' }}>
                       <NumberFlow trend={-1} value={parseInt(countdown.hh)} format={{ minimumIntegerDigits: 2 }} />
@@ -3737,34 +3727,13 @@ export default function BatchesView({ batches, onBatchesChange, initialBatchId, 
                   <span className="text-gray-400 dark:text-gray-500">· next cycle →</span>
                 </button>
               )}
-              <div className="relative" ref={addMenuRef}>
-                <button
-                  onClick={() => { setShowAddMenu(v => !v); setShowNewBatchForm(false); }}
-                  className="flex items-center gap-1 text-2xs font-medium text-gray-900 bg-[#CDF698] hover:bg-[var(--color-200)] px-2.5 py-1 rounded-full transition-colors"
-                >
-                  <Plus aria-hidden="true" className="w-3 h-3" strokeWidth={2.5} />
-                  Add batch
-                  <ChevronDown aria-hidden="true" className={`w-3 h-3 transition-transform duration-150 ${showAddMenu ? 'rotate-180' : ''}`} strokeWidth={2} />
-                </button>
-                {showAddMenu && !showNewBatchForm && (
-                  <div className="absolute right-0 top-full mt-1 bg-white dark:bg-[var(--color-2)] border border-gray-200 dark:border-[var(--border)] rounded-xl shadow-xl overflow-hidden z-40 dropdown-enter min-w-[160px]">
-                    <button
-                      onClick={() => { setShowNewBatchForm(true); setShowAddMenu(false); }}
-                      className="w-full flex items-center gap-2 px-3 py-2 text-2xs hover-item transition-colors text-left text-gray-700 dark:text-gray-200"
-                    >
-                      <FileText aria-hidden="true" className="w-3 h-3 text-gray-400" strokeWidth={2} />
-                      New blank batch
-                    </button>
-                    <button
-                      onClick={() => { setShowImport(true); setShowAddMenu(false); }}
-                      className="w-full flex items-center gap-2 px-3 py-2 text-2xs hover-item transition-colors text-left text-gray-700 dark:text-gray-200"
-                    >
-                      <Upload aria-hidden="true" className="w-3 h-3 text-gray-400" strokeWidth={2} />
-                      Import CSV
-                    </button>
-                  </div>
-                )}
-              </div>
+              <button
+                onClick={() => setShowNewBatchForm(true)}
+                className="flex items-center gap-1 text-2xs font-medium text-gray-900 bg-[#CDF698] hover:bg-[var(--color-200)] px-2.5 py-1 rounded-full transition-colors"
+              >
+                <Plus aria-hidden="true" className="w-3 h-3" strokeWidth={2.5} />
+                Add batch
+              </button>
             </div>
           </div>
 
@@ -3994,20 +3963,6 @@ export default function BatchesView({ batches, onBatchesChange, initialBatchId, 
               )}
             </div>
 
-            {/* Needs my action filter */}
-            <button
-              onClick={() => setNeedsMyAction(v => !v)}
-              aria-pressed={needsMyAction}
-              className={`flex items-center gap-1.5 text-2xs py-1.5 px-2.5 rounded-lg border transition-colors ${
-                needsMyAction
-                  ? 'bg-[var(--color-50)] dark:bg-[var(--color-950)]/20 border-[var(--color-300)] dark:border-[var(--color-700)] text-[var(--color-700)] dark:text-[var(--color-300)]'
-                  : 'bg-white dark:bg-[var(--color-1)] border-gray-200 dark:border-[var(--border)] text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-[var(--surface-3)]'
-              }`}
-            >
-              <AlertCircle aria-hidden="true" className="w-3 h-3 flex-shrink-0" strokeWidth={2} />
-              <span className="font-medium">Needs my action</span>
-            </button>
-
             {/* Clear all */}
             {isAnyFiltered && (
               <button
@@ -4019,7 +3974,6 @@ export default function BatchesView({ batches, onBatchesChange, initialBatchId, 
                   setShowArchived(false);
                   setCpFilter(new Set());
                   setCpSearch('');
-                  setNeedsMyAction(false);
                   setFocusedIndex(0);
                 }}
                 className="text-2xs text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 transition-colors ml-1"
@@ -4032,12 +3986,13 @@ export default function BatchesView({ batches, onBatchesChange, initialBatchId, 
           {/* ── Dashboard content ─────────────────────────────────────────────── */}
           <div className="flex-1 overflow-y-auto px-5 py-4 space-y-4">
 
-            {/* Metrics row — 6 cards */}
-            <div className="grid grid-cols-3 gap-3 lg:grid-cols-6">
+            {/* Metrics row */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 lg:grid-cols-7">
               {[
-                { label: 'Draft',    count: draftCount,    accent: 'text-gray-500 dark:text-gray-400' },
-                { label: 'Pending',  count: pendingCount,  accent: 'text-amber-600 dark:text-amber-400' },
-                { label: 'Approved', count: approvedCount, accent: 'text-[var(--color-700)] dark:text-[var(--color-300)]' },
+                { label: 'Draft',                 count: draftCount,      accent: 'text-gray-500 dark:text-gray-400' },
+                { label: 'Pending approval',      count: myApprovalCount, accent: 'text-amber-600 dark:text-amber-400' },
+                { label: 'Awaiting counterparty', count: awaitingCpCount, accent: 'text-gray-500 dark:text-gray-400' },
+                { label: 'Approved',              count: approvedCount,   accent: 'text-[var(--color-700)] dark:text-[var(--color-300)]' },
               ].map(({ label, count, accent }) => (
                 <div key={label} className="rounded-xl bg-white dark:bg-[var(--color-2)] px-4 py-3">
                   <p className={`text-2xs uppercase tracking-wide font-semibold ${accent}`}>{label}</p>
@@ -4081,7 +4036,7 @@ export default function BatchesView({ batches, onBatchesChange, initialBatchId, 
                   <Calendar aria-hidden="true" className="w-8 h-8 opacity-40" strokeWidth={1.5} />
                   <p className="text-sm">No batches match the current filters</p>
                   <button
-                    onClick={() => { setDatePreset('all'); setCustomFrom(''); setCustomTo(''); setStatusFilter(new Set()); setShowArchived(false); setCpFilter(new Set()); setNeedsMyAction(false); }}
+                    onClick={() => { setDatePreset('all'); setCustomFrom(''); setCustomTo(''); setStatusFilter(new Set()); setShowArchived(false); setCpFilter(new Set()); }}
                     className="text-2xs text-[var(--color-700)] dark:text-[var(--color-300)] hover:underline"
                   >
                     Clear filters
@@ -4094,7 +4049,6 @@ export default function BatchesView({ batches, onBatchesChange, initialBatchId, 
                       {sortTh('id',           'Batch ID',    'text-left pl-4 pr-2 py-2')}
                       {sortTh('counterparty', 'Counterparty','text-left px-2 py-2')}
                       {sortTh('status',       'Status',      'text-left px-2 py-2')}
-                      {sortTh('direction',    'Direction',   'text-left px-2 py-2')}
                       {sortTh('cutoff',       'Cutoff',      'text-left px-2 py-2')}
                       {sortTh('obligations',  '# Obligations','text-right px-2 py-2')}
                       {sortTh('deliver',      'To deliver',  'text-right px-2 py-2')}
@@ -4122,12 +4076,9 @@ export default function BatchesView({ batches, onBatchesChange, initialBatchId, 
                             </div>
                           </td>
                           <td className="px-2 py-1.5">
-                            <StatusBadge status={batch.origin === 'requested' && batch.status === 'Draft' ? 'Pending' : batch.status} />
+                            <BatchStatusBadge batch={batch} />
                           </td>
-                          <td className="px-2 py-1.5">
-                            <OriginPill origin={batch.origin} />
-                          </td>
-                          <td className="px-2 py-1.5 text-gray-500 dark:text-gray-400 tabular-nums">{fmtCutoff(batch.cutoffTime)}</td>
+                          <td className="px-2 py-1.5 text-gray-500 dark:text-gray-400 tabular-nums">{fmtCutoff(batch.cutoffTime, tz)}</td>
                           <td className="text-right px-2 py-1.5 tabular-nums text-gray-600 dark:text-gray-300">{batch.deliverObligations.length + batch.receiveObligations.length}</td>
                           <td className="text-right px-2 py-1.5 tabular-nums text-[var(--negative)]">{bDeliver > 0 ? fmtUsdFull(bDeliver) : '—'}</td>
                           <td className="text-right px-2 py-1.5 tabular-nums text-[var(--positive)]">{bReceive > 0 ? fmtUsdFull(bReceive) : '—'}</td>
@@ -4137,20 +4088,13 @@ export default function BatchesView({ batches, onBatchesChange, initialBatchId, 
                         </tr>
                       );
                     })}
-                    {/* Infinite-scroll sentinel + footer */}
-                    {visibleRows < sortedBatchTable.length ? (
+                    {visibleRows < sortedBatchTable.length && (
                       <tr ref={sentinelRef}>
-                        <td colSpan={9} className="text-center py-4 text-2xs text-gray-400 dark:text-gray-500">
+                        <td colSpan={8} className="text-center py-4 text-2xs text-gray-400 dark:text-gray-500">
                           Loading more… ({visibleRows} of {sortedBatchTable.length})
                         </td>
                       </tr>
-                    ) : sortedBatchTable.length > ROW_PAGE ? (
-                      <tr>
-                        <td colSpan={9} className="text-center py-3 text-2xs text-gray-400 dark:text-gray-500">
-                          End of list — {sortedBatchTable.length} batches
-                        </td>
-                      </tr>
-                    ) : null}
+                    )}
                   </tbody>
                 </table>
               )}
@@ -4159,12 +4103,18 @@ export default function BatchesView({ batches, onBatchesChange, initialBatchId, 
         </div>
 
         {showImport && (
-          <ImportModal onConfirm={handleImportConfirm} onClose={() => setShowImport(false)} existingCounterparties={allCounterparties} />
+          <ImportModal
+            onConfirm={handleImportConfirm}
+            onClose={closeImportFlow}
+            existingCounterparties={allCounterparties}
+            initialFiles={importInitialFiles}
+          />
         )}
         <NewBatchModal
           open={showNewBatchForm}
           onClose={() => setShowNewBatchForm(false)}
           onCreate={createBlankBatch}
+          onImportFiles={handleNewBatchImportFiles}
           allCounterparties={allCounterparties}
           defaultCutoff={getNextCycleCutoffLocal()}
         />
@@ -4186,7 +4136,7 @@ export default function BatchesView({ batches, onBatchesChange, initialBatchId, 
       : (DETAIL_PRESETS.find(p => p.value === datePreset)?.label ?? 'All');
   const isDateActive = datePreset !== 'all';
   const isStatusActive = statusFilter.size > 0 || showArchived;
-  const toggleDetailStatus = (s: BatchStatus) => {
+  const toggleDetailStatus = (s: DisplayStatus) => {
     setStatusFilter(prev => { const next = new Set(prev); next.has(s) ? next.delete(s) : next.add(s); return next; });
     setFocusedIndex(0);
   };
@@ -4197,46 +4147,54 @@ export default function BatchesView({ batches, onBatchesChange, initialBatchId, 
       {/* ── BODY: left list + resize handle + right detail ─────────── */}
       <div ref={resizeContainerRef} className="flex flex-1 overflow-hidden">
 
+        {/* ── COLLAPSED RAIL: thin column with expand affordance ───── */}
+        {sidebarCollapsed && (
+          <div className="flex-shrink-0 w-9 flex flex-col items-center py-2 border-r border-gray-100 dark:border-[var(--border)] bg-white dark:bg-black relative z-10">
+            <button
+              onClick={() => setSidebarCollapsed(false)}
+              aria-label="Expand batches list"
+              title="Expand batches list"
+              className="hover-item w-7 h-7 flex items-center justify-center rounded text-gray-500 dark:text-gray-400 transition-colors"
+            >
+              <PanelLeftOpen aria-hidden="true" className="w-4 h-4" strokeWidth={2} />
+            </button>
+            <span
+              className="mt-3 text-[10px] font-semibold tracking-wider text-gray-400 dark:text-gray-500 uppercase"
+              style={{ writingMode: 'vertical-rl' }}
+            >
+              Batches
+            </span>
+          </div>
+        )}
+
         {/* ── LEFT PANEL: searchable batch list (resizable) ────────── */}
+        {!sidebarCollapsed && (
         <div
           ref={sidebarPanelRef}
           style={{ width: `${sidebarWidth}%` }}
-          className="flex-shrink-0 flex flex-col border-r border-gray-100 dark:border-[var(--border)] bg-white dark:bg-black relative z-10 min-w-[260px]"
+          className="flex-shrink-0 flex flex-col border-r border-gray-100 dark:border-[var(--border)] bg-white dark:bg-black relative z-10 min-w-[260px] overflow-hidden"
         >
 
-          {/* Panel header: label + Add batch */}
-          <div className="px-3 pt-3 pb-1 flex items-center justify-between">
-            <span className="text-[10px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wide">Batches</span>
-            <div className="relative" ref={addMenuRef}>
+          {/* Panel header: label + Add batch + collapse */}
+          <div className="px-3 pt-3 pb-1 flex items-center justify-between gap-2">
+            <div className="flex items-center gap-1.5 min-w-0">
+              <span className="text-[10px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wide">Batches</span>
               <button
-                onClick={() => { setShowAddMenu(v => !v); setShowNewBatchForm(false); }}
-                className="flex items-center gap-1 text-2xs font-medium text-gray-900 bg-[#CDF698] hover:bg-[var(--color-200)] px-2.5 py-1 rounded-full transition-colors"
+                onClick={() => setSidebarCollapsed(true)}
+                aria-label="Collapse batches list"
+                title="Collapse batches list"
+                className="hover-item w-6 h-6 flex items-center justify-center rounded text-gray-400 dark:text-gray-500 hover:text-gray-700 dark:hover:text-gray-200 transition-colors flex-shrink-0"
               >
-                <Plus aria-hidden="true" className="w-3 h-3" strokeWidth={2.5} />
-                Add batch
-                <ChevronDown aria-hidden="true" className={`w-3 h-3 transition-transform duration-150 ${showAddMenu ? 'rotate-180' : ''}`} strokeWidth={2} />
+                <PanelLeftClose aria-hidden="true" className="w-4 h-4" strokeWidth={2} />
               </button>
-
-              {showAddMenu && !showNewBatchForm && (
-                <div className="absolute right-0 top-full mt-1 bg-white dark:bg-[var(--color-2)] border border-gray-200 dark:border-[var(--border)] rounded-xl shadow-xl overflow-hidden z-50 dropdown-enter min-w-[160px]">
-                  <button
-                    onClick={() => { setShowNewBatchForm(true); setShowAddMenu(false); }}
-                    className="w-full flex items-center gap-2 px-3 py-2 text-2xs hover-item transition-colors text-left text-gray-700 dark:text-gray-200"
-                  >
-                    <FileText aria-hidden="true" className="w-3 h-3 text-gray-400" strokeWidth={2} />
-                    New blank batch
-                  </button>
-                  <button
-                    onClick={() => { setShowImport(true); setShowAddMenu(false); }}
-                    className="w-full flex items-center gap-2 px-3 py-2 text-2xs hover-item transition-colors text-left text-gray-700 dark:text-gray-200"
-                  >
-                    <Upload aria-hidden="true" className="w-3 h-3 text-gray-400" strokeWidth={2} />
-                    Import CSV
-                  </button>
-                </div>
-              )}
-
             </div>
+            <button
+              onClick={() => setShowNewBatchForm(true)}
+              className="flex items-center gap-1 text-2xs font-medium text-gray-900 bg-[#CDF698] hover:bg-[var(--color-200)] px-2.5 py-1 rounded-full transition-colors"
+            >
+              <Plus aria-hidden="true" className="w-3 h-3" strokeWidth={2.5} />
+              Add batch
+            </button>
           </div>
 
           {/* Search */}
@@ -4413,19 +4371,6 @@ export default function BatchesView({ batches, onBatchesChange, initialBatchId, 
               )}
             </div>
 
-            {/* Needs my action chip */}
-            <button
-              onClick={() => setNeedsMyAction(v => !v)}
-              aria-pressed={needsMyAction}
-              className={`flex items-center gap-1 text-[10px] font-medium px-2 py-0.5 rounded-full border transition-colors ${
-                needsMyAction
-                  ? 'bg-[var(--color-50)] dark:bg-[var(--color-950)]/20 border-[var(--color-300)] dark:border-[var(--color-700)] text-[var(--color-700)] dark:text-[var(--color-300)]'
-                  : 'border-gray-200 dark:border-[var(--border)] text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-[var(--surface-3)]'
-              }`}
-            >
-              <AlertCircle aria-hidden="true" className="w-2.5 h-2.5" strokeWidth={2} />
-              Needs my action
-            </button>
           </div>
 
           {/* Compact batch table */}
@@ -4434,14 +4379,14 @@ export default function BatchesView({ batches, onBatchesChange, initialBatchId, 
             role="listbox"
             aria-label="Batch list"
             tabIndex={0}
-            className="flex-1 overflow-y-auto focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--color-700)]"
+            className="flex-1 overflow-y-auto overflow-x-hidden focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--color-700)]"
             onKeyDown={handleKeyDown}
           >
             {detailFilteredBatches.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-10 text-center gap-2">
                 <Search aria-hidden="true" className="w-6 h-6 text-gray-300 dark:text-gray-600" strokeWidth={1.5} />
                 <p className="text-xs text-gray-400 dark:text-gray-500">No batches found</p>
-                <button onClick={() => { setListSearch(''); setDatePreset('all'); setCustomFrom(''); setCustomTo(''); setStatusFilter(new Set()); setShowArchived(false); setCpFilter(new Set()); setNeedsMyAction(false); }} className="text-2xs text-[var(--color-700)] dark:text-[var(--color-300)] hover:underline">Clear filters</button>
+                <button onClick={() => { setListSearch(''); setDatePreset('all'); setCustomFrom(''); setCustomTo(''); setStatusFilter(new Set()); setShowArchived(false); setCpFilter(new Set()); }} className="text-2xs text-[var(--color-700)] dark:text-[var(--color-300)] hover:underline">Clear filters</button>
               </div>
             ) : (
               (() => {
@@ -4457,7 +4402,6 @@ export default function BatchesView({ batches, onBatchesChange, initialBatchId, 
                   <tr>
                     {sortTh('counterparty', 'Counterparty', 'table-compact pl-2 text-left text-[10px] text-gray-400 dark:text-gray-500 uppercase tracking-wide w-full')}
                     {sortTh('status',       'Status',       'table-compact pr-2 text-left text-[10px] text-gray-400 dark:text-gray-500 uppercase tracking-wide whitespace-nowrap')}
-                    {sortTh('direction',    'Direction',    'table-compact pr-2 text-left text-[10px] text-gray-400 dark:text-gray-500 uppercase tracking-wide whitespace-nowrap')}
                     {showCutoffCol && sortTh('cutoff', 'Cutoff', 'table-compact pr-2 text-left text-[10px] text-gray-400 dark:text-gray-500 uppercase tracking-wide whitespace-nowrap')}
                     {showOblCountCol && sortTh('obligations', 'Obl', 'table-compact pr-2 text-right text-[10px] text-gray-400 dark:text-gray-500 uppercase tracking-wide whitespace-nowrap')}
                     {showDeliverReceiveCols && (
@@ -4487,28 +4431,34 @@ export default function BatchesView({ batches, onBatchesChange, initialBatchId, 
                             ? 'bg-[oklch(0.800_0.012_264)] dark:bg-[oklch(0.268_0.011_264)]'
                             : 'hover:bg-gray-50 dark:hover:bg-white/5'
                         } ${isFocused && !isSelected ? 'ring-1 ring-inset ring-gray-300 dark:ring-gray-600' : ''}`}
-                        onClick={() => { setSelectedId(batch.id); setFocusedIndex(i); setShowOverview(false); listRef.current?.focus(); }}
+                        onClick={() => { setSelectedId(batch.id); setFocusedIndex(i); setShowOverview(false); clearNewBadge(batch.id); listRef.current?.focus(); }}
                       >
                         <td className="py-1.5 px-2">
                           <div className="flex items-center gap-1.5">
-                            <CounterpartyAvatar name={batch.counterpartyName} size={18} />
+                            <span className="relative flex-shrink-0">
+                              <CounterpartyAvatar name={batch.counterpartyName} size={18} />
+                              {newlyImportedIds.has(batch.id) && (
+                                <span
+                                  aria-label="New batch"
+                                  title="New — just imported"
+                                  className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-[var(--color-500)] dark:bg-[var(--color-300)] ring-2 ring-white dark:ring-black"
+                                />
+                              )}
+                            </span>
                             <div className="min-w-0">
                               <div className={`text-[11px] font-medium truncate leading-tight ${isSelected ? 'text-gray-900 dark:text-gray-100' : 'text-gray-800 dark:text-gray-200'}`}>{batch.counterpartyName}</div>
                               {!showCutoffCol && (
-                                <div className="text-[10px] text-gray-400 dark:text-gray-500 tabular-nums leading-tight">{fmtCutoff(batch.cutoffTime)}</div>
+                                <div className="text-[10px] text-gray-400 dark:text-gray-500 tabular-nums leading-tight">{fmtCutoff(batch.cutoffTime, tz)}</div>
                               )}
                             </div>
                           </div>
                         </td>
                         <td className="py-1.5 px-2">
-                          <StatusBadge status={batch.origin === 'requested' && batch.status === 'Draft' ? 'Pending' : batch.status} pct={getBatchClearedPct(batch)} />
-                        </td>
-                        <td className="py-1.5 px-2">
-                          <OriginPill origin={batch.origin} />
+                          <BatchStatusBadge batch={batch} />
                         </td>
                         {showCutoffCol && (
                           <td className="py-1.5 px-2 text-[10px] text-gray-500 dark:text-gray-400 tabular-nums whitespace-nowrap">
-                            {fmtCutoff(batch.cutoffTime)}
+                            {fmtCutoff(batch.cutoffTime, tz)}
                           </td>
                         )}
                         {showOblCountCol && (
@@ -4541,39 +4491,44 @@ export default function BatchesView({ batches, onBatchesChange, initialBatchId, 
             )}
           </div>
         </div>
+        )}
 
-        {/* ── RESIZE HANDLE ────────────────────────────────────────── */}
-        <div
-          role="separator"
-          aria-orientation="vertical"
-          aria-label="Resize batch list panel"
-          onMouseDown={(e) => { e.preventDefault(); setIsResizing(true); }}
-          className="w-1 cursor-col-resize bg-transparent hover:bg-[var(--color-200)] dark:hover:bg-[var(--color-700)] active:bg-[var(--color-300)] dark:active:bg-[var(--color-600)] transition-colors flex-shrink-0"
-        />
+        {/* ── RESIZE HANDLE — hidden when collapsed ─────────────────── */}
+        {!sidebarCollapsed && (
+          <div
+            role="separator"
+            aria-orientation="vertical"
+            aria-label="Resize batch list panel"
+            onMouseDown={(e) => { e.preventDefault(); setIsResizing(true); }}
+            className="w-1 cursor-col-resize bg-transparent hover:bg-[var(--color-200)] dark:hover:bg-[var(--color-700)] active:bg-[var(--color-300)] dark:active:bg-[var(--color-600)] transition-colors flex-shrink-0"
+          />
+        )}
 
-        {/* ── RIGHT PANEL: landing or batch detail ─────────────────── */}
+        {/* ── RIGHT PANEL: overview or batch detail. When neither, the
+            effect above will bounce us back to the main dashboard. ──── */}
         <div className="flex-1 overflow-hidden min-w-0">
           {showOverview ? (
             <PostedTotalOverview batches={batches} />
           ) : selectedBatch ? (
             <BatchDetail batch={selectedBatch} onUpdate={handleBatchUpdate} onDelete={handleBatchDelete} isDemo={isDemo} />
-          ) : (
-            <BatchesLanding
-              filteredBatches={filteredBatches}
-              onSelectBatch={(id) => { setSelectedId(id); setFocusedIndex(filteredBatches.findIndex(b => b.id === id)); }}
-            />
-          )}
+          ) : null}
         </div>
       </div>
 
       {/* ── Modals ────────────────────────────────────────────────── */}
       {showImport && (
-        <ImportModal onConfirm={handleImportConfirm} onClose={() => setShowImport(false)} existingCounterparties={allCounterparties} />
+        <ImportModal
+          onConfirm={handleImportConfirm}
+          onClose={closeImportFlow}
+          existingCounterparties={allCounterparties}
+          initialFiles={importInitialFiles}
+        />
       )}
       <NewBatchModal
         open={showNewBatchForm}
         onClose={() => setShowNewBatchForm(false)}
         onCreate={createBlankBatch}
+        onImportFiles={handleNewBatchImportFiles}
         allCounterparties={allCounterparties}
         defaultCutoff={getNextCycleCutoffLocal()}
       />

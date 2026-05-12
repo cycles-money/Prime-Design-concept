@@ -1,5 +1,6 @@
-import { useState } from 'react';
-import { EyeOff, Eye, Users, ChevronRight, TrendingUp } from 'lucide-react';
+import { useContext, useState } from 'react';
+import { EyeOff, Eye, Users, ChevronRight, TrendingUp, Globe, Clock } from 'lucide-react';
+import { TimeZoneContext, type TimeZonePref } from '../context/TimeZoneContext';
 
 // ── Section wrapper ────────────────────────────────────────────────────────────
 
@@ -74,6 +75,23 @@ export default function SettingsView() {
   const [apiKeySaved, setApiKeySaved] = useState(true);
   const [accountNameSaved, setAccountNameSaved] = useState(true);
 
+  // Time-zone preference — App owns the state and persists it; we just dispatch
+  // an event when the user toggles. Keeps SettingsView free of prop-drilling.
+  const tzPref = useContext(TimeZoneContext);
+  const setTzPref = (next: TimeZonePref) => {
+    window.dispatchEvent(new CustomEvent<TimeZonePref>('set-tz-pref', { detail: next }));
+  };
+  // Resolve the user's local IANA zone label for the helper text (e.g. "EDT").
+  const localZoneLabel = (() => {
+    try {
+      return Intl.DateTimeFormat(undefined, { timeZoneName: 'short' })
+        .formatToParts(new Date())
+        .find((p) => p.type === 'timeZoneName')?.value ?? 'Local';
+    } catch {
+      return 'Local';
+    }
+  })();
+
   const isConfigured = apiKey.trim().length > 0 && accountName.trim().length > 0;
 
   const handleSaveApiKey = () => { setApiKeySaved(true); };
@@ -90,6 +108,38 @@ export default function SettingsView() {
             Configure API integrations and platform credentials.
           </p>
         </div>
+
+        {/* ── Display preferences ──────────────────────────────────────── */}
+        <Section title="Display">
+          <div className="flex items-center justify-between gap-6">
+            <div className="min-w-0">
+              <p className="text-xs font-medium text-gray-700 dark:text-gray-300">Time zone</p>
+              <p className="text-2xs text-gray-500 dark:text-gray-300 mt-1 leading-relaxed">
+                Default time zone used to display batch cutoffs across the app.
+              </p>
+            </div>
+            <div className="inline-flex items-center gap-0.5 bg-gray-100 dark:bg-[var(--surface-3)] rounded-full p-0.5 flex-shrink-0">
+              {([
+                { value: 'utc' as const, label: 'UTC', Icon: Globe },
+                { value: 'local' as const, label: `Local (${localZoneLabel})`, Icon: Clock },
+              ]).map(({ value, label, Icon }) => (
+                <button
+                  key={value}
+                  onClick={() => setTzPref(value)}
+                  aria-pressed={tzPref === value}
+                  className={`inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-full transition-colors ${
+                    tzPref === value
+                      ? 'bg-white dark:bg-[var(--color-2)] text-gray-800 dark:text-gray-100 shadow-sm'
+                      : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200'
+                  }`}
+                >
+                  <Icon aria-hidden="true" className="w-3 h-3" strokeWidth={2} />
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
+        </Section>
 
         {/* ── Lynq API Integration ─────────────────────────────────────── */}
         <Section title="Lynq API Integration">
