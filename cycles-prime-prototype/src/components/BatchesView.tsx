@@ -51,8 +51,8 @@ function stripCommas(s: string): string {
 // at a glance whether a batch is waiting on them or on the counterparty.
 export type DisplayStatus =
   | 'Draft'
-  | 'Pending approval'
-  | 'Awaiting counterparty'
+  | 'Pending Approval'
+  | 'Awaiting Counterparty'
   | 'Approved'
   | 'Cleared'
   | 'Rejected'
@@ -63,9 +63,9 @@ export type DisplayStatus =
 const DISPLAY_STATUS_STYLES: Record<DisplayStatus, string> = {
   'Draft':
     'bg-transparent text-gray-600 dark:text-gray-300 border border-gray-200 dark:border-[var(--border)]',
-  'Pending approval':
+  'Pending Approval':
     'bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-400 border border-amber-200 dark:border-amber-800',
-  'Awaiting counterparty':
+  'Awaiting Counterparty':
     'bg-gray-50 dark:bg-[var(--surface-3)] text-gray-600 dark:text-gray-300 border border-gray-200 dark:border-[var(--border)]',
   'Approved':
     'bg-[var(--color-50)] dark:bg-[var(--color-950)]/20 text-[var(--color-700)] dark:text-[var(--color-300)] border border-[var(--color-200)] dark:border-[var(--color-900)]',
@@ -94,10 +94,10 @@ function getBatchClearedPct(batch: Batch): number {
 // "Pending approval" — it's the user's turn to act on it.
 export function getDisplayStatus(batch: Batch): DisplayStatus {
   if (batch.status === 'Pending') {
-    return isMyTurn(batch) ? 'Pending approval' : 'Awaiting counterparty';
+    return isMyTurn(batch) ? 'Pending Approval' : 'Awaiting Counterparty';
   }
   if (batch.status === 'Draft' && batch.origin === 'requested') {
-    return 'Pending approval';
+    return 'Pending Approval';
   }
   return batch.status as DisplayStatus;
 }
@@ -116,7 +116,7 @@ export function BatchStatusBadge({ batch }: { batch: Batch }) {
 // Lower-level badge used for legend chips / step pills where we don't have a
 // full batch context. Accepts either a raw `BatchStatus` or a `DisplayStatus`.
 function statusToDisplay(status: BatchStatus | DisplayStatus): DisplayStatus {
-  return status === 'Pending' ? 'Pending approval' : (status as DisplayStatus);
+  return status === 'Pending' ? 'Pending Approval' : (status as DisplayStatus);
 }
 
 function StatusBadge({ status }: { status: BatchStatus | DisplayStatus; pct?: number }) {
@@ -1538,12 +1538,12 @@ function BatchDetail({ batch, onUpdate, onDelete, isDemo }: BatchDetailProps) {
           const steps: { label: DisplayStatus; statuses: BatchStatus[] }[] = isSender
             ? [
                 { label: 'Draft',                 statuses: ['Draft'] },
-                { label: 'Awaiting counterparty', statuses: ['Pending'] },
+                { label: 'Awaiting Counterparty', statuses: ['Pending'] },
                 { label: 'Approved',              statuses: ['Approved'] },
                 { label: 'Cleared',               statuses: ['Cleared'] },
               ]
             : [
-                { label: 'Pending approval',      statuses: ['Pending', 'Draft'] },
+                { label: 'Pending Approval',      statuses: ['Pending', 'Draft'] },
                 { label: 'Approved',              statuses: ['Approved'] },
                 { label: 'Cleared',               statuses: ['Cleared'] },
               ];
@@ -3342,12 +3342,12 @@ export default function BatchesView({ batches, onBatchesChange, initialBatchId, 
   const ARCHIVED_STATUSES = new Set<BatchStatus>(['Revoked', 'Deleted', 'Rejected']);
   // Filter chips use *display* statuses so users can target "Pending approval"
   // separately from "Awaiting counterparty" (both map to data status `Pending`).
-  const ACTIVE_STATUSES: DisplayStatus[] = ['Draft', 'Pending approval', 'Awaiting counterparty', 'Approved', 'Cleared', 'Cancelled'];
+  const ACTIVE_STATUSES: DisplayStatus[] = ['Draft', 'Pending Approval', 'Awaiting Counterparty', 'Approved', 'Cleared', 'Cancelled'];
   const [statusFilter, setStatusFilter] = useState<Set<DisplayStatus>>(
     () => {
-      const raw = (loadSavedFilters()?.statusFilter as string[] | undefined) ?? ['Draft', 'Pending approval', 'Awaiting counterparty', 'Approved'];
+      const raw = (loadSavedFilters()?.statusFilter as string[] | undefined) ?? ['Draft', 'Pending Approval', 'Awaiting Counterparty', 'Approved'];
       // Migrate any legacy 'Pending' entries from before the split.
-      const migrated = raw.flatMap(s => s === 'Pending' ? ['Pending approval', 'Awaiting counterparty'] : [s]);
+      const migrated = raw.flatMap(s => s === 'Pending' ? ['Pending Approval', 'Awaiting Counterparty'] : [s]);
       return new Set(migrated.filter((s): s is DisplayStatus => (ACTIVE_STATUSES as string[]).includes(s)));
     }
   );
@@ -3663,8 +3663,8 @@ export default function BatchesView({ batches, onBatchesChange, initialBatchId, 
 
   // ── Dashboard computed values ──────────────────────────────────────────────────
   const draftCount      = filteredBatches.filter(b => getDisplayStatus(b) === 'Draft').length;
-  const myApprovalCount = filteredBatches.filter(b => getDisplayStatus(b) === 'Pending approval').length;
-  const awaitingCpCount = filteredBatches.filter(b => getDisplayStatus(b) === 'Awaiting counterparty').length;
+  const myApprovalCount = filteredBatches.filter(b => getDisplayStatus(b) === 'Pending Approval').length;
+  const awaitingCpCount = filteredBatches.filter(b => getDisplayStatus(b) === 'Awaiting Counterparty').length;
   const approvedCount   = filteredBatches.filter(b => getDisplayStatus(b) === 'Approved').length;
   const totalDeliver  = filteredBatches.reduce(
     (s, b) => s + b.deliverObligations.reduce((ss, o) => ss + o.amountUsd, 0), 0
@@ -3986,20 +3986,36 @@ export default function BatchesView({ batches, onBatchesChange, initialBatchId, 
           {/* ── Dashboard content ─────────────────────────────────────────────── */}
           <div className="flex-1 overflow-y-auto px-5 py-4 space-y-4">
 
-            {/* Metrics row */}
+            {/* Metrics row — click a status card to filter the table below */}
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 lg:grid-cols-7">
-              {[
-                { label: 'Draft',                 count: draftCount,      accent: 'text-gray-500 dark:text-gray-400' },
-                { label: 'Pending approval',      count: myApprovalCount, accent: 'text-amber-600 dark:text-amber-400' },
-                { label: 'Awaiting counterparty', count: awaitingCpCount, accent: 'text-gray-500 dark:text-gray-400' },
-                { label: 'Approved',              count: approvedCount,   accent: 'text-[var(--color-700)] dark:text-[var(--color-300)]' },
-              ].map(({ label, count, accent }) => (
-                <div key={label} className="rounded-xl bg-white dark:bg-[var(--color-2)] px-4 py-3">
-                  <p className={`text-2xs uppercase tracking-wide font-semibold ${accent}`}>{label}</p>
-                  <p className="text-2xl font-bold tabular-nums mt-1 text-gray-900 dark:text-gray-100">{count}</p>
-                  <p className="text-2xs text-gray-400 dark:text-gray-500 mt-0.5">batch{count !== 1 ? 'es' : ''}</p>
-                </div>
-              ))}
+              {([
+                { label: 'Draft' as DisplayStatus,                 count: draftCount,      accent: 'text-gray-500 dark:text-gray-400' },
+                { label: 'Pending Approval' as DisplayStatus,      count: myApprovalCount, accent: 'text-amber-600 dark:text-amber-400' },
+                { label: 'Awaiting Counterparty' as DisplayStatus, count: awaitingCpCount, accent: 'text-gray-500 dark:text-gray-400' },
+                { label: 'Approved' as DisplayStatus,              count: approvedCount,   accent: 'text-[var(--color-700)] dark:text-[var(--color-300)]' },
+              ]).map(({ label, count, accent }) => {
+                const isActive = statusFilter.size === 1 && statusFilter.has(label);
+                return (
+                  <button
+                    key={label}
+                    type="button"
+                    aria-pressed={isActive}
+                    onClick={() => {
+                      setStatusFilter(isActive ? new Set() : new Set([label]));
+                      setFocusedIndex(0);
+                    }}
+                    className={`text-left rounded-xl px-4 py-3 transition-[background-color,box-shadow,transform] duration-150 active:scale-[0.99] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--color-700)] ${
+                      isActive
+                        ? 'bg-white dark:bg-[var(--color-2)] ring-2 ring-[var(--color-500)] dark:ring-[var(--color-400)]'
+                        : 'bg-white dark:bg-[var(--color-2)] hover:bg-gray-50 dark:hover:bg-[var(--surface-3)]'
+                    }`}
+                  >
+                    <p className={`text-2xs uppercase tracking-wide font-semibold ${accent}`}>{label}</p>
+                    <p className="text-2xl font-bold tabular-nums mt-1 text-gray-900 dark:text-gray-100">{count}</p>
+                    <p className="text-2xs text-gray-400 dark:text-gray-500 mt-0.5">batch{count !== 1 ? 'es' : ''}</p>
+                  </button>
+                );
+              })}
               <div className="rounded-xl bg-white dark:bg-[var(--color-2)] px-4 py-3">
                 <div className="flex items-center gap-1.5">
                   <ArrowUp aria-hidden="true" className="w-3.5 h-3.5 text-[var(--negative)]" strokeWidth={2} />
