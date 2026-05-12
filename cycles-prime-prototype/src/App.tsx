@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Agentation } from 'agentation';
-import { ClipboardList, RefreshCw, Settings, CircleHelp, Sun, Moon, TrendingUp } from 'lucide-react';
+import { ClipboardList, RefreshCw, Settings, CircleHelp, TrendingUp } from 'lucide-react';
 import BatchesView from './components/BatchesView';
 import CyclesView from './components/CyclesView';
 import { AccountOverview } from './components/CyclesView';
@@ -27,8 +27,6 @@ function BatchesIcon()       { return <ClipboardList aria-hidden="true" classNam
 function CyclesIcon()        { return <RefreshCw     aria-hidden="true" className="w-3.5 h-3.5" />; }
 function SettingsIcon()      { return <Settings      aria-hidden="true" className="w-4 h-4" />; }
 function HelpIcon()          { return <CircleHelp    aria-hidden="true" className="w-4 h-4" />; }
-function SunIcon()           { return <Sun           aria-hidden="true" className="w-4 h-4" />; }
-function MoonIcon()          { return <Moon          aria-hidden="true" className="w-4 h-4" />; }
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<Tab>('batches');
@@ -48,11 +46,9 @@ export default function App() {
     }
     setActiveTab(tab);
   };
-  const [isDark, setIsDark] = useState<boolean>(() => {
-    const saved = localStorage.getItem('cycles-prime-dark');
-    if (saved !== null) return saved === 'true';
-    return window.matchMedia('(prefers-color-scheme: dark)').matches;
-  });
+  // Light mode dropped per the May 12 mock-test review — UI is dark-only now.
+  // The DarkModeContext stays so existing consumers don't have to change.
+  const isDark = true;
 
   // Global time-zone preference. Defaults to UTC (matches today's behaviour);
   // users can flip to their local zone in Settings.
@@ -75,10 +71,9 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    document.documentElement.classList.toggle('dark', isDark);
-    document.documentElement.style.colorScheme = isDark ? 'dark' : 'light';
-    localStorage.setItem('cycles-prime-dark', String(isDark));
-  }, [isDark]);
+    document.documentElement.classList.add('dark');
+    document.documentElement.style.colorScheme = 'dark';
+  }, []);
 
   useEffect(() => {
     const handler = (e: Event) => {
@@ -215,19 +210,6 @@ export default function App() {
             </button>
 
 
-            {/* Dark mode toggle */}
-            <button
-              onClick={() => setIsDark((d) => !d)}
-              aria-label={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
-              title={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
-              className="hover-item w-8 h-8 flex items-center justify-center rounded-full
-                text-gray-500 dark:text-gray-300
-                hover:text-gray-700 dark:hover:text-gray-300
-                transition-[background-color,color,border-color,transform] duration-150 active:scale-[0.97]
-                focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--color-700)]"
-            >
-              {isDark ? <SunIcon /> : <MoonIcon />}
-            </button>
           </div>
         </header>
 

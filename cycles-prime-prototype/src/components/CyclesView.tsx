@@ -1355,29 +1355,11 @@ function CycleDetailPanel({ cycle, batches, onPercentChange }: { cycle: Cycle; b
         )}
       </div>
 
-      {/* Cleared-% slider — available on any past cycle. Drag to adjust how
-          much of the cycle is cleared; the KPI tiles + chart update live. */}
-      {onPercentChange && !cycle.isScheduled && (
-        <div className="rounded-lg border border-amber-300/70 dark:border-amber-700/60 bg-amber-50/60 dark:bg-amber-900/10 px-4 py-2.5">
-          <div className="flex items-center justify-between gap-3 mb-1.5">
-            <div className="flex items-center gap-2 text-[11px]">
-              <span className="font-semibold text-amber-700 dark:text-amber-300">Cleared</span>
-              <span className="text-amber-700/80 dark:text-amber-400/80">Drag to adjust clearing progress</span>
-            </div>
-            <span className="text-xs font-bold tabular-nums text-amber-700 dark:text-amber-300">{cycle.percentCleared}%</span>
-          </div>
-          <input
-            type="range"
-            min={0}
-            max={100}
-            step={1}
-            value={cycle.percentCleared}
-            onChange={(e) => onPercentChange(Number(e.target.value))}
-            aria-label="Cycle percent cleared"
-            className="w-full accent-[var(--color-700)]"
-          />
-        </div>
-      )}
+      {/* Cleared-% slider removed per May 12 review — Benji didn't want a
+          demo affordance embedded in the user-facing cycle UI. The user can
+          still drive the cleared state via "Simulate next cycle" in the
+          sidebar (which sets a 60% baseline). The `onPercentChange` prop
+          stays in the signature for any future demo controls. */}
 
       {/* KPI row */}
           <div className="grid grid-cols-2 gap-4">

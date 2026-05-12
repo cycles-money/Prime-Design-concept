@@ -3332,7 +3332,9 @@ export default function BatchesView({ batches, onBatchesChange, initialBatchId, 
   };
   type DatePreset = 'all' | 'today' | '24h' | '3d' | '7d' | '30d' | '3m' | 'custom';
   const [datePreset, setDatePreset] = useState<DatePreset>(
-    () => (loadSavedFilters()?.datePreset as DatePreset) ?? 'today'
+    // Default opens on "All time" so the dashboard is populated by default
+    // (user-test prep, May 12 sync) — "Today" was hiding most batches.
+    () => (loadSavedFilters()?.datePreset as DatePreset) ?? 'all'
   );
   const [customFrom, setCustomFrom] = useState('');
   const [customTo, setCustomTo] = useState('');

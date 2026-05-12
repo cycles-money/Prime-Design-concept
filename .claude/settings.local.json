@@ -11,7 +11,13 @@
       "Bash(grep -n \"key={row.id}\\\\|key={r.id}\\\\|key={\\\\`Id_MM1\" /Users/axelgillino/Documents/Slides/cycles-prime-prototype/src/components/CyclesView.tsx)",
       "Bash(cd /Users/axelgillino/Documents/Slides/cycles-prime-prototype && grep -r \"Import CSV\" src --include=\"*.tsx\" --include=\"*.jsx\" -n)",
       "Bash(grep -n \"upcoming\" /Users/axelgillino/Documents/Slides/cycles-prime-prototype/src/components/CyclesView.tsx | head -20)",
-      "Bash(git add *)"
+      "Bash(git add *)",
+      "Bash(npm run *)",
+      "Bash(gh api *)",
+      "Bash(python3 -c \"import json,sys; d=json.load\\(sys.stdin\\); print\\(f'status: {d.get\\(\\\\\"status\\\\\"\\)}\\\\\\\\ncommit:  {d.get\\(\\\\\"commit\\\\\"\\)}\\\\\\\\nupdated: {d.get\\(\\\\\"updated_at\\\\\"\\)}\\\\\\\\nduration: {d.get\\(\\\\\"duration\\\\\"\\)}ms\\\\\\\\nerror:   {d.get\\(\\\\\"error\\\\\"\\)}'  \\)\")",
+      "Bash(git ls-remote *)",
+      "Bash(python3 -c \"import json,sys; ds=json.load\\(sys.stdin\\); [print\\(d['updated_at'], d['status'], d['commit'][:10], 'err:', d.get\\('error',{}\\).get\\('message'\\) or 'none'\\) for d in ds[:5]]\")",
+      "Bash(git fetch *)"
     ]
   }
 }
