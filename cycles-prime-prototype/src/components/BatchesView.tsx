@@ -3365,6 +3365,9 @@ export default function BatchesView({ batches, onBatchesChange, initialBatchId, 
   const [cpSearch, setCpSearch] = useState('');
   const cpFilterRef = useRef<HTMLDivElement>(null);
   const [listSearch, setListSearch] = useState('');
+  // 'cutoff' kept on the sort enum because the data still has a cutoffTime
+  // (used as the default sort key — newest first — even though the column
+  // itself is hidden in the list now).
   type BatchSortCol = 'id' | 'counterparty' | 'status' | 'cutoff' | 'obligations' | 'deliver' | 'receive' | 'net';
   const [batchSortCol, setBatchSortCol] = useState<BatchSortCol>('cutoff');
   const [batchSortDir, setBatchSortDir] = useState<'asc' | 'desc'>('desc');
@@ -4067,7 +4070,6 @@ export default function BatchesView({ batches, onBatchesChange, initialBatchId, 
                       {sortTh('id',           'Batch ID',    'text-left pl-4 pr-2 py-2')}
                       {sortTh('counterparty', 'Counterparty','text-left px-2 py-2')}
                       {sortTh('status',       'Status',      'text-left px-2 py-2')}
-                      {sortTh('cutoff',       'Cutoff',      'text-left px-2 py-2')}
                       {sortTh('obligations',  '# Obligations','text-right px-2 py-2')}
                       {sortTh('deliver',      'To deliver',  'text-right px-2 py-2')}
                       {sortTh('receive',      'To receive',  'text-right px-2 py-2')}
@@ -4096,7 +4098,6 @@ export default function BatchesView({ batches, onBatchesChange, initialBatchId, 
                           <td className="px-2 py-1.5">
                             <BatchStatusBadge batch={batch} />
                           </td>
-                          <td className="px-2 py-1.5 text-gray-500 dark:text-gray-400 tabular-nums">{fmtCutoff(batch.cutoffTime, tz)}</td>
                           <td className="text-right px-2 py-1.5 tabular-nums text-gray-600 dark:text-gray-300">{batch.deliverObligations.length + batch.receiveObligations.length}</td>
                           <td className="text-right px-2 py-1.5 tabular-nums text-[var(--negative)]">{bDeliver > 0 ? fmtUsdFull(bDeliver) : '—'}</td>
                           <td className="text-right px-2 py-1.5 tabular-nums text-[var(--positive)]">{bReceive > 0 ? fmtUsdFull(bReceive) : '—'}</td>
@@ -4108,7 +4109,7 @@ export default function BatchesView({ batches, onBatchesChange, initialBatchId, 
                     })}
                     {visibleRows < sortedBatchTable.length && (
                       <tr ref={sentinelRef}>
-                        <td colSpan={8} className="text-center py-4 text-2xs text-gray-400 dark:text-gray-500">
+                        <td colSpan={7} className="text-center py-4 text-2xs text-gray-400 dark:text-gray-500">
                           Loading more… ({visibleRows} of {sortedBatchTable.length})
                         </td>
                       </tr>
@@ -4408,10 +4409,7 @@ export default function BatchesView({ batches, onBatchesChange, initialBatchId, 
               </div>
             ) : (
               (() => {
-                // Reveal more columns as the sidebar gets wider. The cutoff is
-                // stacked under the counterparty name in the narrowest layout
-                // and pulled into its own column once there's room.
-                const showCutoffCol = sidebarPxWidth >= 420;
+                // Reveal more columns as the sidebar gets wider.
                 const showOblCountCol = sidebarPxWidth >= 540;
                 const showDeliverReceiveCols = sidebarPxWidth >= 660;
                 return (
@@ -4420,7 +4418,6 @@ export default function BatchesView({ batches, onBatchesChange, initialBatchId, 
                   <tr>
                     {sortTh('counterparty', 'Counterparty', 'table-compact pl-2 text-left text-[10px] text-gray-400 dark:text-gray-500 uppercase tracking-wide w-full')}
                     {sortTh('status',       'Status',       'table-compact pr-2 text-left text-[10px] text-gray-400 dark:text-gray-500 uppercase tracking-wide whitespace-nowrap')}
-                    {showCutoffCol && sortTh('cutoff', 'Cutoff', 'table-compact pr-2 text-left text-[10px] text-gray-400 dark:text-gray-500 uppercase tracking-wide whitespace-nowrap')}
                     {showOblCountCol && sortTh('obligations', 'Obl', 'table-compact pr-2 text-right text-[10px] text-gray-400 dark:text-gray-500 uppercase tracking-wide whitespace-nowrap')}
                     {showDeliverReceiveCols && (
                       <>
@@ -4465,20 +4462,12 @@ export default function BatchesView({ batches, onBatchesChange, initialBatchId, 
                             </span>
                             <div className="min-w-0">
                               <div className={`text-[11px] font-medium truncate leading-tight ${isSelected ? 'text-gray-900 dark:text-gray-100' : 'text-gray-800 dark:text-gray-200'}`}>{batch.counterpartyName}</div>
-                              {!showCutoffCol && (
-                                <div className="text-[10px] text-gray-400 dark:text-gray-500 tabular-nums leading-tight">{fmtCutoff(batch.cutoffTime, tz)}</div>
-                              )}
                             </div>
                           </div>
                         </td>
                         <td className="py-1.5 px-2">
                           <BatchStatusBadge batch={batch} />
                         </td>
-                        {showCutoffCol && (
-                          <td className="py-1.5 px-2 text-[10px] text-gray-500 dark:text-gray-400 tabular-nums whitespace-nowrap">
-                            {fmtCutoff(batch.cutoffTime, tz)}
-                          </td>
-                        )}
                         {showOblCountCol && (
                           <td className="py-1.5 px-2 text-right text-[10px] text-gray-500 dark:text-gray-400 tabular-nums whitespace-nowrap">
                             {oblCount}
