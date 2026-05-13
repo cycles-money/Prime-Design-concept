@@ -1,0 +1,11 @@
+counterparty,direction,token,amount_asset,amount_usd
+FalconX,deliver,BTC,10,650000
+FalconX,,ETH,,
+Cumberland DRW,deliver,SOL,5000,750000
+Cumberland DRW,receive,USDC,,750000
+B2C2,deliver,BTC,8,520000
+B2C2,deliver,LTC,,
+Wintermute,,ETH,,
+Wintermute,receive,USDC,900000,900000
+Jump Trading,deliver,AVAX,15000,450000
+Jump Trading,,,,
