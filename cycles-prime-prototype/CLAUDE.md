@@ -10,7 +10,112 @@
 **Cycles Prime** is a B2B settlement / clearing platform prototype.
 Stack: **React 18 + TypeScript + Vite + Tailwind CSS 3**
 Dev server: `http://localhost:5173`
-No router — state-based tab navigation only.
+Tab navigation is state-based today (no router); a router will likely be added when prime-web-2 forks from this codebase.
+
+This prototype is the seed of `prime-web-2`, the next-generation production frontend for prime-server. It is built against a `MockApiClient` whose method signatures and response shapes mirror the real prime-server API exactly, so that the production swap is a one-line provider change. **Treat the API client as a first-class part of the prototype architecture — not test scaffolding.**
+
+---
+
+## Data Layer — the ApiClient (READ FIRST)
+
+> **Always source data through the ApiClient, never via new local seed constants.**
+> The whole point of this layer is that the designer's Claude can build new
+> features against a realistic, server-shaped API and have them survive the
+> prime-web-2 swap unchanged.
+
+### Architecture
+
+```
+┌────────────────────────────────────────────────┐
+│ Component                                      │
+│   const client = useApiClient();               │
+│   const { data, loading, error } =             │
+│     useApiQuery((c) => c.listBatches(), []);   │
+└──────────────────────┬─────────────────────────┘
+                       │ ApiClient interface
+                       │ (src/api/client.ts)
+                       ▼
+        ┌──────────────┴──────────────┐
+        │                             │
+   MockApiClient                 real ApiClient
+   (src/api/mockClient.ts)       (in prime-web-2;
+   in-memory store seeded         not present here)
+   from mockData.ts
+```
+
+The `ApiClient` interface (`src/api/client.ts`) is the contract. `MockApiClient` (`src/api/mockClient.ts`) is the in-memory implementation used in this prototype. The same interface will be implemented by the real client when prime-web-2 forks; everything else stays identical.
+
+### How to consume the client
+
+**Reading data:** use `useApiQuery` for a single fetch. It returns `{ data, loading, error, refetch }` and reruns when any value in the deps array changes. Loading state is exposed but old data stays visible during refetch (no flicker).
+
+```tsx
+import { useApiQuery } from '../api/ApiClientContext';
+import type { BatchResponse } from '../api/types';
+
+function MyView() {
+  const { data, loading, error } = useApiQuery(
+    (client) => client.listBatches({ limit: 50 }),
+    [],
+  );
+
+  if (loading && !data) return <Loading />;
+  if (error) return <ErrorBanner error={error} />;
+  if (!data) return null;
+
+  return <BatchTable batches={data.data} />;
+}
+```
+
+**Mutations:** call the client directly via `useApiClient()` and refetch after.
+
+```tsx
+import { useApiClient, useApiQuery } from '../api/ApiClientContext';
+
+function CreateButton() {
+  const client = useApiClient();
+  const { refetch } = useApiQuery((c) => c.listBatches(), []);
+
+  const handleClick = async () => {
+    await client.createBatch({ external_id: 'demo-1' });
+    await refetch();
+  };
+
+  return <button onClick={handleClick}>New batch</button>;
+}
+```
+
+### Rules
+
+- **Never add new seed arrays inside components.** All seed data lives in `src/api/mockSeed.ts`, transformed into server-shaped responses. If a new feature needs new data, extend the seed there.
+- **Never `import { mockBatches } from '../data/mockData'` in new code.** That file is legacy — the seed converter (`mockSeed.ts`) is its only remaining consumer.
+- **Always use server response types** (`BatchResponse`, `CycleResponse`, etc. from `src/api/types.ts`) in new components. The legacy prototype types in `src/types/index.ts` exist only to keep the unmigrated heavy views (BatchesView, CyclesView, CycleDetailView, CounterpartyClearingPanel) working until they're migrated.
+- **When you touch one of the heavy unmigrated views**, migrate it: pull data via `useApiQuery` inside the view, consume server types directly, and shrink `src/api/adapters.ts` accordingly.
+- **Amounts are strings** in the server schema (matches Rust serde output — avoids float precision issues on large numbers). Parse with `Number(...)` for display, `BigNumber` for arithmetic.
+- **Timestamps are ISO 8601 strings.**
+- **Snake_case field names** on every response/request type (matches the Rust JSON).
+
+### Extending the API surface
+
+When the user asks for a new feature that needs data the mock doesn't provide:
+
+1. **If the real prime-server already exposes the endpoint**, the type for it already lives in `src/api/types.ts` (it's a verbatim copy of the prime-web types file). Confirm the method signature exists in the `ApiClient` interface (`src/api/client.ts`). If it does but `MockApiClient` doesn't implement it, fill in the implementation in `src/api/mockClient.ts`.
+2. **If you're inventing a new endpoint**, this is a flag — first ask whether the feature could be served by an existing endpoint, since prime-web-2 will need the real server to support it. If it really is new, add the request/response types to `src/api/types.ts`, the method signature to the `ApiClient` interface, the mock implementation to `MockApiClient`, and leave a `TODO(prime-server): wire this endpoint server-side` comment.
+3. **Never store data in `useState(SEED)` and call it done.** That breaks the abstraction.
+
+### Error UI rehearsal
+
+To exercise error states during design, instantiate the client with an error rate in `src/api/ApiClientContext.tsx`:
+
+```tsx
+defaultClient.current = new MockApiClient({ errorRate: 0.1 });
+```
+
+10% of requests will throw `ApiError(500, 'Simulated mock error')`. Useful for visual review of error banners.
+
+### Adapters — the back-compat bridge
+
+`src/api/adapters.ts` translates server response types to the prototype's legacy `Batch`/`Cycle` types. It exists so the heavy unmigrated views keep working while their data is fetched through the API client at the App root. **It's a transitional artifact — shrink it whenever you migrate a view.**
 
 ---
 
@@ -70,15 +175,22 @@ That single script:
 ```
 cycles-prime-prototype/
 ├── src/
-│   ├── App.tsx                   ← Root + tab routing + dark mode
+│   ├── App.tsx                   ← Root + tab routing + dark mode + ApiClientProvider
 │   ├── main.tsx                  ← Vite entry
 │   ├── index.css                 ← ALL design tokens (CSS vars) + global styles
+│   ├── api/                      ← Data layer (see "Data Layer" section above)
+│   │   ├── types.ts              ← Server response/request types (verbatim from prime-web)
+│   │   ├── client.ts             ← ApiClient interface + ApiError
+│   │   ├── mockClient.ts         ← MockApiClient implementing ApiClient
+│   │   ├── mockSeed.ts           ← Seed data: converts legacy mockData.ts to server shapes
+│   │   ├── adapters.ts           ← Server-types → legacy prototype-types (transitional)
+│   │   └── ApiClientContext.tsx  ← Provider + useApiClient + useApiQuery
 │   ├── components/               ← Feature components (PascalCase .tsx)
-│   │   ├── BatchesView.tsx
-│   │   ├── CyclesView.tsx
-│   │   ├── CycleDetailView.tsx
+│   │   ├── BatchesView.tsx              (LEGACY — still on prototype types)
+│   │   ├── CyclesView.tsx               (LEGACY — still on prototype types)
+│   │   ├── CycleDetailView.tsx          (LEGACY — still on prototype types)
+│   │   ├── CounterpartyClearingPanel.tsx (LEGACY — still on prototype types)
 │   │   ├── CounterpartiesView.tsx
-│   │   ├── CounterpartyClearingPanel.tsx
 │   │   ├── SettingsView.tsx
 │   │   ├── HelpView.tsx
 │   │   ├── LinkSettlementModal.tsx
@@ -87,9 +199,9 @@ cycles-prime-prototype/
 │   ├── context/
 │   │   └── DarkModeContext.ts    ← Dark mode React context
 │   ├── data/
-│   │   └── mockData.ts           ← All mock/seed data
+│   │   └── mockData.ts           ← LEGACY seed (consumed only by mockSeed.ts)
 │   ├── types/
-│   │   └── index.ts              ← All TypeScript interfaces
+│   │   └── index.ts              ← LEGACY prototype types (used by unmigrated heavy views)
 │   └── utils/
 │       └── formatters.ts         ← Currency, date, number formatters
 ├── tailwind.config.js            ← Tailwind theme extensions
@@ -211,14 +323,17 @@ import { TrendingUp, TrendingDown, AlertCircle } from 'lucide-react'            
 
 ## State Management
 
-- Use **React hooks only** — no external state library
-- Local state: `useState`
-- Side effects: `useEffect`
-- Dark mode: `useContext(DarkModeContext)` from `src/context/DarkModeContext.ts`
-- DOM refs: `useRef`
-- Do NOT introduce Redux, Zustand, Recoil, Jotai, or any state library
+State splits cleanly into two categories — handle them differently:
 
-**Tab navigation pattern:**
+**Server state** (anything that lives on the prime-server: batches, cycles, counterparties, settlements, tenders, etc.) → goes through `useApiClient()` / `useApiQuery`. See the "Data Layer" section above. **Never re-derive server state into local `useState` and treat that as the source of truth.**
+
+**Client UI state** (modal open/closed, selected row, form draft, dark mode, expanded panel) → plain `useState`, `useEffect`, `useRef`, React context. No external state library.
+
+- Do NOT introduce Redux, Zustand, Recoil, Jotai, or any state library — context + hooks cover everything the prototype needs
+- A query library (TanStack Query, SWR) may be added later if/when caching/optimistic-updates become valuable; for now `useApiQuery` is sufficient
+- Dark mode: `useContext(DarkModeContext)` from `src/context/DarkModeContext.ts`
+
+**Tab navigation pattern (current, may be replaced by a router):**
 ```tsx
 // Programmatic tab switch (from any component)
 window.dispatchEvent(new CustomEvent('navigate-tab', { detail: { tab: 'cycles' } }))
@@ -249,17 +364,20 @@ import { formatCurrency } from '../utils/formatters'
 
 ## TypeScript Patterns
 
-- All interfaces defined in `src/types/index.ts` — add new types there
+- **API request/response types** live in `src/api/types.ts` — these are the canonical server schema (copied verbatim from prime-web). Add new endpoint types here.
+- **Legacy prototype types** live in `src/types/index.ts` — only for unmigrated heavy views (BatchesView, CyclesView, etc.). Do NOT add new types here; use server response types.
 - Props typed inline with the component: `function MyComponent({ foo, bar }: { foo: string; bar: number })`
 - Or named interface in same file for complex props
 - `strict: true` — no implicit any
-- Financial amounts are `number` (USD cents or base units), display via `formatters.ts`
+- **Financial amounts in the API** are `string` (matches Rust serde JSON — avoids float precision issues). Parse with `Number(...)` for display, store/transmit as strings. Legacy prototype types still use `number` for display amounts.
 
 ---
 
 ## Data & Formatting
 
-All mock data lives in `src/data/mockData.ts`. Never hardcode data inside components.
+**Data flows through the ApiClient — see the "Data Layer" section above.** The legacy `src/data/mockData.ts` is consumed only by `src/api/mockSeed.ts` to populate the MockApiClient on startup; **do not import from it in new components**.
+
+Never hardcode data inside components.
 
 **Formatters from `src/utils/formatters.ts`:**
 ```tsx
@@ -365,13 +483,15 @@ Maintain existing keyboard patterns:
 - ❌ Do NOT hardcode hex colors — use CSS variables
 - ❌ Do NOT install new UI libraries (shadcn, radix, headlessui, etc.)
 - ❌ Do NOT install new icon libraries — lucide-react only
-- ❌ Do NOT add a router — use state-based navigation
-- ❌ Do NOT add a state management library
+- ❌ Do NOT add a state management library (Redux/Zustand/etc.) — context + hooks cover it
 - ❌ Do NOT create `src/components/ui/` subdirectory — keep components flat
 - ❌ Do NOT use inline `style={{}}` for anything in the design system
 - ❌ Do NOT use Tailwind `dark:` prefix on token-based colors
 - ❌ Do NOT add path aliases (`@/`) — use relative imports
 - ❌ Do NOT add Storybook or other tooling without being asked
+- ❌ Do NOT add a router right now — tab-state nav still works (a router will likely come with the prime-web-2 fork; revisit if you're adding many new top-level surfaces)
+- ❌ **Do NOT bypass the ApiClient.** Never `import { mockBatches } from '../data/mockData'` in new code. Never define a `const SEED = [...]` array of business data inside a component. Always pull through `useApiClient()` / `useApiQuery`.
+- ❌ Do NOT add new types to `src/types/index.ts` — that file is legacy. New types go in `src/api/types.ts` matching the server schema.
 
 ---
 

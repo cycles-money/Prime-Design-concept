@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { Agentation } from 'agentation';
 import { ClipboardList, RefreshCw, Users, Settings, CircleHelp, Sun, Moon, TrendingUp } from 'lucide-react';
 import BatchesView from './components/BatchesView';
@@ -8,7 +8,8 @@ import SettingsView from './components/SettingsView';
 import HelpView from './components/HelpView';
 import CounterpartiesView from './components/CounterpartiesView';
 import { DarkModeContext } from './context/DarkModeContext';
-import { mockBatches, mockCycles } from './data/mockData';
+import { ApiClientProvider, useApiQuery } from './api/ApiClientContext';
+import { batchToLegacy, cycleToLegacy } from './api/adapters';
 import type { Batch, Cycle } from './types';
 
 type Tab = 'batches' | 'cycles' | 'counterparties' | 'settings' | 'help' | 'overview';
@@ -29,9 +30,50 @@ function SunIcon()           { return <Sun           aria-hidden="true" classNam
 function MoonIcon()          { return <Moon          aria-hidden="true" className="w-4 h-4" />; }
 
 export default function App() {
+  return (
+    <ApiClientProvider>
+      <AppInner />
+    </ApiClientProvider>
+  );
+}
+
+function AppInner() {
   const [activeTab, setActiveTab] = useState<Tab>('batches');
-  const [batches, setBatches] = useState<Batch[]>(mockBatches);
-  const [cycles, setCycles] = useState<Cycle[]>(mockCycles);
+
+  // Fetch via the ApiClient. The heavy views still consume legacy prototype
+  // types (`Batch`, `Cycle`) — we adapt at the App boundary. As individual
+  // views are migrated to consume server types directly via useApiClient(),
+  // these adapters can shrink and eventually be removed.
+  const batchesQuery = useApiQuery((c) => c.listBatches({ limit: 1000 }), []);
+  const cyclesQuery = useApiQuery((c) => c.listCycles({ limit: 1000 }), []);
+
+  const batchesData = batchesQuery.data;
+  const cyclesData = cyclesQuery.data;
+  const batches: Batch[] = useMemo(
+    () => (batchesData ? batchesData.data.map(batchToLegacy) : []),
+    [batchesData],
+  );
+  const cycles: Cycle[] = useMemo(
+    () => (cyclesData ? cyclesData.data.map(cycleToLegacy) : []),
+    [cyclesData],
+  );
+
+  // Setters that the heavy views still expect. They mutate the local legacy
+  // copy — full round-trip to the api client is a future migration step
+  // per-view (call updateBatch/etc. inside the view, then refetch).
+  const [batchesOverride, setBatchesOverride] = useState<Batch[] | null>(null);
+  const [cyclesOverride, setCyclesOverride] = useState<Cycle[] | null>(null);
+  const effectiveBatches = batchesOverride ?? batches;
+  const effectiveCycles = cyclesOverride ?? cycles;
+  // When fresh data arrives, drop the override so the api client is the
+  // source of truth again.
+  useEffect(() => {
+    setBatchesOverride(null);
+  }, [batchesData]);
+  useEffect(() => {
+    setCyclesOverride(null);
+  }, [cyclesData]);
+
   const [initialBatchId, setInitialBatchId] = useState<string | undefined>(undefined);
   const [initialCpFilter, setInitialCpFilter] = useState<string | undefined>(undefined);
   const [batchesKey, setBatchesKey] = useState(0);
@@ -207,9 +249,9 @@ export default function App() {
 
         {/* ── Main content ─────────────────────────────────────────────────── */}
         <main id="main-content" className="flex-1 overflow-hidden">
-          {activeTab === 'batches'        ? <BatchesView key={batchesKey} batches={batches} onBatchesChange={setBatches} initialBatchId={initialBatchId} initialCpFilter={initialCpFilter} isDemo={isDemo} />
-          : activeTab === 'cycles'         ? <CyclesView batches={batches} cycles={cycles} onCyclesChange={setCycles} isDemo={isDemo} />
-          : activeTab === 'counterparties' ? <CounterpartiesView key={cpKey} batches={batches} />
+          {activeTab === 'batches'        ? <BatchesView key={batchesKey} batches={effectiveBatches} onBatchesChange={setBatchesOverride} initialBatchId={initialBatchId} initialCpFilter={initialCpFilter} isDemo={isDemo} />
+          : activeTab === 'cycles'         ? <CyclesView batches={effectiveBatches} cycles={effectiveCycles} onCyclesChange={setCyclesOverride} isDemo={isDemo} />
+          : activeTab === 'counterparties' ? <CounterpartiesView key={cpKey} batches={effectiveBatches} />
           : activeTab === 'settings'       ? <SettingsView />
           : activeTab === 'overview'       ? (
               <div className="flex flex-col h-full overflow-hidden bg-gray-50 dark:bg-[var(--color-1)]">
@@ -230,8 +272,8 @@ export default function App() {
                 </div>
                 <div className="flex-1 overflow-hidden">
                   <AccountOverview
-                    cycles={cycles}
-                    batches={batches}
+                    cycles={effectiveCycles}
+                    batches={effectiveBatches}
                     onSelectCycle={() => setActiveTab('cycles')}
                   />
                 </div>
