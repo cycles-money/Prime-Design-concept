@@ -34,7 +34,7 @@ function formatNumInput(raw: string, maxFractionDigits = 8): string {
   if (!/^-?\d*\.?\d*$/.test(cleaned)) return raw;
   const [intRaw, decRaw] = cleaned.split('.');
   const intDigits = intRaw.replace(/[^0-9]/g, '');
-  const formattedInt = intDigits === '' ? '' : Number(intDigits).toLocaleString();
+  const formattedInt = intDigits === '' ? '' : intDigits.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
   if (decRaw === undefined) return formattedInt;
   const decDigits = decRaw.replace(/[^0-9]/g, '').slice(0, maxFractionDigits);
   return formattedInt + '.' + decDigits;
@@ -42,6 +42,19 @@ function formatNumInput(raw: string, maxFractionDigits = 8): string {
 
 function stripCommas(s: string): string {
   return s.replace(/,/g, '');
+}
+
+function clampRemaining(value: number): number {
+  return Math.max(0, value);
+}
+
+function recalculateObligation(ob: Obligation, patch: Partial<Obligation>): Obligation {
+  const next = { ...ob, ...patch };
+  return {
+    ...next,
+    remainingAsset: clampRemaining(next.amountAsset - next.clearedAsset),
+    remainingUsd: clampRemaining(next.amountUsd - next.clearedUsd),
+  };
 }
 
 // ── Status badge ──────────────────────────────────────────────────────────────
@@ -476,8 +489,8 @@ function AssetSelect({ value, onChange, ariaLabel = 'Asset' }: {
 interface CombinedObligationTableProps {
   deliverObligations: Obligation[];
   receiveObligations: Obligation[];
-  onUpdateDeliver: (index: number, field: keyof Obligation, value: number | string) => void;
-  onUpdateReceive: (index: number, field: keyof Obligation, value: number | string) => void;
+  onUpdateDeliver: (index: number, patch: Partial<Obligation>) => void;
+  onUpdateReceive: (index: number, patch: Partial<Obligation>) => void;
   onMoveObligation: (fromDir: 'deliver' | 'receive', index: number) => void;
   batchStatus: BatchStatus;
   counterpartyName: string;
@@ -532,7 +545,7 @@ function CombinedObligationTable({
     const amountAsset = parseFloat(newRow.amountAsset) || 0;
     const price = ASSET_USD[asset] ?? 1;
     const amountUsd = parseFloat(newRow.amountUsd) || amountAsset * price;
-    const ob: Obligation = { asset, amountAsset, clearedAsset: 0, remainingAsset: amountAsset, amountUsd, clearedUsd: 0, remainingUsd: amountUsd };
+    const ob: Obligation = recalculateObligation({ asset, amountAsset, clearedAsset: 0, remainingAsset: amountAsset, amountUsd, clearedUsd: 0, remainingUsd: amountUsd }, {});
     onAddObligation(ob, newRow.dir);
     setNewRow(null);
   };
@@ -748,10 +761,7 @@ function CombinedObligationTable({
                                 const price = ASSET_USD[asset] ?? 1;
                                 const newUsd = ob.amountAsset * price;
                                 const update = isDeliver ? onUpdateDeliver : onUpdateReceive;
-                                update(idx, 'asset' as keyof Obligation, asset);
-                                update(idx, 'amountUsd', newUsd);
-                                update(idx, 'remainingAsset', ob.amountAsset - ob.clearedAsset);
-                                update(idx, 'remainingUsd', newUsd - ob.clearedUsd);
+                                update(idx, { asset, amountUsd: newUsd });
                               }}
                             />
                           ) : (
@@ -775,10 +785,7 @@ function CombinedObligationTable({
                                 const v = parseFloat(stripCommas(formatted)) || 0;
                                 const price = ASSET_USD[ob.asset] ?? 1;
                                 const update = isDeliver ? onUpdateDeliver : onUpdateReceive;
-                                update(idx, 'amountAsset', v);
-                                update(idx, 'amountUsd', v * price);
-                                update(idx, 'remainingAsset', v - ob.clearedAsset);
-                                update(idx, 'remainingUsd', (v * price) - ob.clearedUsd);
+                                update(idx, { amountAsset: v, amountUsd: v * price });
                               }}
                               onKeyDown={(e) => {
                                 if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
@@ -788,10 +795,7 @@ function CombinedObligationTable({
                                   const v = Math.max(0, ob.amountAsset + dir * step);
                                   const price = ASSET_USD[ob.asset] ?? 1;
                                   const update = isDeliver ? onUpdateDeliver : onUpdateReceive;
-                                  update(idx, 'amountAsset', v);
-                                  update(idx, 'amountUsd', v * price);
-                                  update(idx, 'remainingAsset', v - ob.clearedAsset);
-                                  update(idx, 'remainingUsd', (v * price) - ob.clearedUsd);
+                                  update(idx, { amountAsset: v, amountUsd: v * price });
                                 }
                               }}
                               className="w-full text-right text-[11px] font-medium bg-transparent border border-transparent hover:border-gray-200 dark:hover:border-[var(--border)] focus:border-[var(--color-700)] dark:focus:border-[var(--color-700)] focus:outline-none rounded px-1.5 py-0.5 text-gray-800 dark:text-gray-200 tabular-nums"
@@ -823,10 +827,7 @@ function CombinedObligationTable({
                                 const price = ASSET_USD[ob.asset] ?? 1;
                                 const asset = price > 0 ? usd / price : 0;
                                 const update = isDeliver ? onUpdateDeliver : onUpdateReceive;
-                                update(idx, 'amountUsd', usd);
-                                update(idx, 'amountAsset', asset);
-                                update(idx, 'remainingUsd', usd - ob.clearedUsd);
-                                update(idx, 'remainingAsset', asset - ob.clearedAsset);
+                                update(idx, { amountUsd: usd, amountAsset: asset });
                               }}
                               onKeyDown={(e) => {
                                 if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
@@ -837,10 +838,7 @@ function CombinedObligationTable({
                                   const price = ASSET_USD[ob.asset] ?? 1;
                                   const asset = price > 0 ? usd / price : 0;
                                   const update = isDeliver ? onUpdateDeliver : onUpdateReceive;
-                                  update(idx, 'amountUsd', usd);
-                                  update(idx, 'amountAsset', asset);
-                                  update(idx, 'remainingUsd', usd - ob.clearedUsd);
-                                  update(idx, 'remainingAsset', asset - ob.clearedAsset);
+                                  update(idx, { amountUsd: usd, amountAsset: asset });
                                 }
                               }}
                               className="w-full text-right text-[11px] bg-transparent border border-transparent hover:border-gray-200 dark:hover:border-[var(--border)] focus:border-[var(--color-700)] dark:focus:border-[var(--color-700)] focus:outline-none rounded px-1.5 py-0.5 text-gray-400 dark:text-gray-500 tabular-nums"
@@ -1268,7 +1266,7 @@ function BatchDetail({ batch, onUpdate, onDelete, isDemo }: BatchDetailProps) {
       const newAsset = tweak(o.amountAsset);
       const price = ASSET_USD[o.asset] ?? 1;
       const newUsd = newAsset * price;
-      return { ...o, amountAsset: newAsset, amountUsd: newUsd, remainingAsset: newAsset - o.clearedAsset, remainingUsd: newUsd - o.clearedUsd };
+      return recalculateObligation(o, { amountAsset: newAsset, amountUsd: newUsd });
     };
     const baseline = {
       deliverObligations: cloneObligations(batch.deliverObligations),
@@ -1310,16 +1308,16 @@ function BatchDetail({ batch, onUpdate, onDelete, isDemo }: BatchDetailProps) {
   const receiveClearedUsd  = batch.receiveObligations.reduce((s, o) => s + o.clearedUsd, 0);
   const receiveRemainingUsd = batch.receiveObligations.reduce((s, o) => s + o.remainingUsd, 0);
 
-  const updateDeliver = (index: number, field: keyof Obligation, value: number | string) => {
+  const updateDeliver = (index: number, patch: Partial<Obligation>) => {
     const updated = batch.deliverObligations.map((o, i) =>
-      i === index ? { ...o, [field]: value } : o
+      i === index ? recalculateObligation(o, patch) : o
     );
     onUpdate({ ...batch, deliverObligations: updated });
   };
 
-  const updateReceive = (index: number, field: keyof Obligation, value: number | string) => {
+  const updateReceive = (index: number, patch: Partial<Obligation>) => {
     const updated = batch.receiveObligations.map((o, i) =>
-      i === index ? { ...o, [field]: value } : o
+      i === index ? recalculateObligation(o, patch) : o
     );
     onUpdate({ ...batch, receiveObligations: updated });
   };
