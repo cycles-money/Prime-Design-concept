@@ -34,7 +34,7 @@ function formatNumInput(raw: string, maxFractionDigits = 8): string {
   if (!/^-?\d*\.?\d*$/.test(cleaned)) return raw;
   const [intRaw, decRaw] = cleaned.split('.');
   const intDigits = intRaw.replace(/[^0-9]/g, '');
-  const formattedInt = intDigits === '' ? '' : Number(intDigits).toLocaleString();
+  const formattedInt = intDigits === '' ? '' : intDigits.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
   if (decRaw === undefined) return formattedInt;
   const decDigits = decRaw.replace(/[^0-9]/g, '').slice(0, maxFractionDigits);
   return formattedInt + '.' + decDigits;
